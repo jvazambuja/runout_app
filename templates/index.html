@@ -1,9 +1,164 @@
-Runout Analysis Interface
-    
-
-
-    
-        3D Topography and Initial Sliding Mass
-        Drag to rotate. Scroll to zoom.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Runout Analysis Interface</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; display: flex; height: 100vh; }
         
-        {{ plot_html | safe }}
+        /* Sidebar styling */
+        .sidebar { width: 320px; background-color: #ffffff; padding: 25px; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 10; overflow-y: auto; }
+        
+        /* Main content and Tabs styling */
+        .main-content { flex-grow: 1; padding: 25px; display: flex; flex-direction: column; overflow-y: auto; }
+        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
+        .tab { padding: 12px 24px; cursor: pointer; font-weight: 600; color: #666; transition: 0.2s; border-bottom: 3px solid transparent; }
+        .tab:hover { color: #0056b3; }
+        .tab.active { border-bottom-color: #0056b3; color: #0056b3; }
+        .tab-content { display: none; flex-grow: 1; flex-direction: column; }
+        .tab-content.active { display: flex; }
+        
+        /* Elements inside Analysis Tab */
+        .plot-container { flex-grow: 1; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 15px; }
+        .volume-display { background-color: #e9ecef; padding: 15px; border-radius: 6px; text-align: center; margin-bottom: 25px; border-left: 4px solid #0056b3; }
+        .volume-display h3 { margin: 0; font-size: 1.8rem; color: #0056b3; }
+        .volume-display p { margin: 5px 0 0 0; color: #555; font-size: 0.9rem; }
+        
+        /* Elements inside Tutorial Tab */
+        .tutorial-container { background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); line-height: 1.6; color: #333; max-width: 800px; }
+        .tutorial-container h2 { color: #0056b3; margin-top: 0; }
+        .tutorial-container h3 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 30px; }
+        .tutorial-container ol { padding-left: 20px; }
+        .tutorial-container li { margin-bottom: 15px; }
+        .code-block { background-color: #f8f9fa; padding: 10px; border-radius: 4px; border: 1px solid #ddd; font-family: monospace; display: block; margin-top: 5px; }
+
+        /* Form styling */
+        h2.sidebar-title { font-size: 1.2rem; color: #333; margin-top: 0; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #444; font-size: 0.9rem; }
+        input[type="file"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button[type="submit"] { width: 100%; padding: 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; transition: 0.2s; }
+        button[type="submit"]:hover { background-color: #004494; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2 class="sidebar-title">Analysis Parameters</h2>
+        <form method="POST" action="/" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="friction_angle">Basal Friction Angle (degrees):</label>
+                <input type="number" step="0.1" name="friction_angle" id="friction_angle" value="{{ friction_angle }}" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="runout_distance">Target Runout Distance (m):</label>
+                <input type="number" step="0.1" name="runout_distance" id="runout_distance" value="{{ runout_distance }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="angle_repose">Deposit Angle of Repose (degrees):</label>
+                <input type="number" step="0.1" name="angle_repose" id="angle_repose" value="{{ angle_repose }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="dem_file">Upload Topography Mesh (.txt):</label>
+                <input type="file" name="dem_file" id="dem_file" accept=".txt,.csv">
+            </div>
+            
+            <div class="form-group">
+                <label for="rupture_file">Upload Rupture Section (.txt):</label>
+                <input type="file" name="rupture_file" id="rupture_file" accept=".txt,.csv">
+            </div>
+            
+            <button type="submit">Update & Calculate</button>
+        </form>
+    </div>
+
+    <div class="main-content">
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('analysis-tab', this)">3D Analysis Viewer</div>
+            <div class="tab" onclick="switchTab('cross-section-tab', this)">2D Cross-Section</div>
+            <div class="tab" onclick="switchTab('tutorial-tab', this)">Data Preparation Tutorial</div>
+        </div>
+
+        <!-- Tab 1: 3D Analysis Output -->
+        <div id="analysis-tab" class="tab-content active">
+            <div class="volume-display">
+                <h3>{{ "%.2f"|format(volume) }} m³</h3>
+                <p>Calculated Initial Sliding Volume</p>
+            </div>
+            <div class="plot-container">
+                {{ plot_html | safe }}
+            </div>
+        </div>
+
+        <!-- Tab 2: 2D Cross-Section -->
+        <div id="cross-section-tab" class="tab-content">
+            <div class="plot-container">
+                {{ plot_2d_html | safe }}
+            </div>
+        </div>
+
+        <!-- Tab 3: QGIS Tutorial -->
+        <div id="tutorial-tab" class="tab-content">
+            <div class="tutorial-container">
+                <h2>How to Prepare Input Files using QGIS</h2>
+                <p>This application requires topographic and rupture plane data formatted as simple text files containing XYZ coordinates. If you have a `.dxf` file (commonly generated by CAD software or drone surveys), you can convert it to the required format using QGIS, a free and open-source Geographic Information System.</p>
+                
+                <h3>Step-by-Step Conversion</h3>
+                <ol>
+                    <li><strong>Import the DXF into QGIS</strong>
+                        <br>Open QGIS. Drag and drop your `.dxf` file directly into the main workspace. When prompted, select the vector layers that contain your elevation contours or points.</li>
+                    
+                    <li><strong>Extract Vertices</strong>
+                        <br>If your DXF contains contour lines or polygons, you need to break them down into individual points. 
+                        <br>Go to the top menu: <strong>Vector > Geometry Tools > Extract Vertices</strong>. Select your imported layer and click Run.</li>
+                    
+                    <li><strong>Add X, Y, and Z Attributes</strong>
+                        <br>The newly created "Vertices" layer has geometric points, but their coordinates are not yet written into a readable data table.
+                        <br>Go to: <strong>Vector > Geometry Tools > Add Geometry Attributes</strong>. Select the Vertices layer and click Run. This creates a new layer with the exact X, Y, and Z values explicitly calculated for every point.</li>
+                    
+                    <li><strong>Export to Text/CSV</strong>
+                        <br>In the Layers panel on the left, right-click the "Added geom info" layer and select <strong>Export > Save Features As...</strong></li>
+                    
+                    <li><strong>Configure the Export Format</strong>
+                        <br>In the export window, set the Format to <strong>Comma Separated Value [CSV]</strong>. 
+                        <br>Under <em>Layer Options</em>, look for the <em>SEPARATOR</em> field and ensure it is set to <code>COMMA</code>. 
+                        <br>Under <em>Select fields to export</em>, uncheck everything except the new <strong>xcoord</strong>, <strong>ycoord</strong>, and <strong>zcoord</strong> columns.</li>
+                </ol>
+
+                <h3>Final File Format</h3>
+                <p>Once exported, you can rename the `.csv` file to `.txt` if you prefer. The application expects the data to look like this:</p>
+                <span class="code-block">
+                    x,y,z<br>
+                    501234.12, 6789012.34, 150.5<br>
+                    501235.50, 6789013.00, 150.2<br>
+                    ...
+                </span>
+                <p>You can repeat this exact process to draw and export your 2D Rupture Section line.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Simple script to handle tab switching -->
+    <script>
+        function switchTab(tabId, element) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show the selected tab content and highlight the clicked tab
+            document.getElementById(tabId).classList.add('active');
+            element.classList.add('active');
+        }
+    </script>
+</body>
+</html>
+</html>
