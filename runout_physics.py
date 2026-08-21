@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.interpolate import griddata, RegularGridInterpolator
+from scipy.spatial import ConvexHull
 import plotly.graph_objects as go
 
 GRID_RES_SOURCE = 0.5
@@ -114,7 +115,7 @@ def discretize_failure_plane(rupture_df, topo_interp, friction_angle_deg, source
 def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res):
     """
     Identifies the failure footprint and traces continuous flow paths via steepest descent.
-    Incorporates inertia and momentum to handle flat plateaus and smooth flow paths.
+    Calculates the convex envelope of the final stopping points.
     """
     rx = rupture_df['x'].values
     ry = rupture_df['y'].values
@@ -156,9 +157,10 @@ def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, an
     tan_reach = np.tan(np.radians(angle_of_reach))
     
     check_lines_x, check_lines_y, check_lines_z = [], [], []
+    end_x, end_y, end_z = [], [], [] # Storage for the final stopping points
     
     ds = max(topo_res / 2.0, 0.5) 
-    paint_radius = max(2.0, 1.5 * topo_res) # Ensures a solid, smoothed footprint
+    paint_radius = max(2.0, 1.5 * topo_res) 
     
     for xs, ys, zs in zip(Xs_sample, Ys_sample, Zs_sample):
         if np.isnan(zs): continue
@@ -167,27 +169,20 @@ def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, an
         L = 0
         path_x, path_y, path_z = [xs], [ys], [zs]
         
-        # Initialize with the main axis direction
         prev_dir_x, prev_dir_y = dir_x, dir_y
         
         for _ in range(int(2500 / ds)):
             pts = np.array([[x_curr, y_curr]])
             gx = interp_dx(pts)[0]
             gy = interp_dy(pts)[0]
-            
             g_mag = np.sqrt(gx**2 + gy**2)
             
-            # INERTIA: Maintain trajectory on flat terrain where gradient is near zero
             if g_mag < 1e-4:
                 curr_dir_x, curr_dir_y = prev_dir_x, prev_dir_y
             else:
                 raw_dir_x, raw_dir_y = -gx/g_mag, -gy/g_mag
-                
-                # MOMENTUM: Blend new descent vector with previous trajectory
                 curr_dir_x = 0.6 * raw_dir_x + 0.4 * prev_dir_x
                 curr_dir_y = 0.6 * raw_dir_y + 0.4 * prev_dir_y
-                
-                # Normalize the blended vector
                 m = np.sqrt(curr_dir_x**2 + curr_dir_y**2)
                 curr_dir_x /= m
                 curr_dir_y /= m
@@ -208,7 +203,6 @@ def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, an
             path_y.append(y_next)
             path_z.append(z_reach)
             
-            # Dynamically paint the maximum reach energy onto the structured grid
             ix = int(np.round((x_curr - x_1d[0]) / topo_res))
             iy = int(np.round((y_curr - y_1d[0]) / topo_res))
             
@@ -221,8 +215,11 @@ def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, an
                         if dist <= paint_radius:
                             Z_reach_max[ni, nj] = max(Z_reach_max[ni, nj], z_reach)
             
-            # Stop if the ray goes underground after escaping the immediate source area
+            # Record the final point where the element stops[cite: 1]
             if z_next > z_reach and L > 2.0:
+                end_x.append(x_next)
+                end_y.append(y_next)
+                end_z.append(z_next) # Anchor to actual topography Z for the line
                 break
                 
             x_curr, y_curr = x_next, y_next
@@ -231,17 +228,33 @@ def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, an
         check_lines_y.extend(path_y + [None])
         check_lines_z.extend(path_z + [None])
 
-    # The final runout footprint is where the topography intercepts this envelope
+    # Calculate Convex Hull Envelope for the final points
+    if len(end_x) >= 3:
+        pts_end = np.column_stack((end_x, end_y))
+        hull = ConvexHull(pts_end)
+        # Append the first vertex to the end to close the ring
+        hull_indices = np.append(hull.vertices, hull.vertices[0])
+        env_x = np.array(end_x)[hull_indices]
+        env_y = np.array(end_y)[hull_indices]
+        env_z = np.array(end_z)[hull_indices] + 1.0 # Slight offset so it hovers visibly above ground
+    else:
+        env_x, env_y, env_z = [], [], []
+
     runout_mask = grid_z <= Z_reach_max
     Z_runout_surf = np.where(runout_mask, Z_reach_max, np.nan)
     
-    return Z_runout_surf, check_lines_x, check_lines_y, check_lines_z, Xs_sample, Ys_sample, Zs_sample
+    return Z_runout_surf, check_lines_x, check_lines_y, check_lines_z, Xs_sample, Ys_sample, Zs_sample, env_x, env_y, env_z
 
 def render_cross_section(x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_runout_surf, grid_res=0.5):
     """
     Generates the 2D longitudinal profile strictly along the original axis. 
-    Note: Real flow may curve away from this 2D slice.
+    Uses nearest-neighbor interpolation on the mask to prevent plunging edge artifacts,
+    and truncates the global H/L reference line at the topographic intersection.
     """
+    import plotly.graph_objects as go
+    from scipy.interpolate import RegularGridInterpolator
+    import numpy as np
+
     rx_orig = rupture_df['x'].values
     ry_orig = rupture_df['y'].values
     rz_orig = rupture_df['z'].values
@@ -249,8 +262,6 @@ def render_cross_section(x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_
     dx_dir = rx_orig[-1] - rx_orig[0]
     dy_dir = ry_orig[-1] - ry_orig[0]
     len_dir = np.sqrt(dx_dir**2 + dy_dir**2)
-    dir_x = dx_dir / len_dir if len_dir > 0 else 0
-    dir_y = dy_dir / len_dir if len_dir > 0 else 1
     
     max_idx = np.argmax(rz_orig)
     x_max, y_max, z_max = rx_orig[max_idx], ry_orig[max_idx], rz_orig[max_idx]
@@ -284,18 +295,30 @@ def render_cross_section(x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_
     z_fail_1d = np.interp(s_1d, orig_dist, rz_orig, right=np.nan, left=np.nan)
     z_fail_1d = np.where(z_fail_1d <= z_topo_1d, z_fail_1d, np.nan)
     
+    # === FIX: Truncate Global H/L Reference Line ===
     dist_L = np.sqrt((x_prof - x_max)**2 + (y_prof - y_max)**2)
     tan_reach = np.tan(np.radians(angle_of_reach))
     proj_1d = (x_prof - x_max) * (dx_last/ds_last) + (y_prof - y_max) * (dy_last/ds_last)
+    
     z_reach_limit_1d = z_max - dist_L * tan_reach
-    z_reach_limit_1d = np.where(proj_1d > -20, z_reach_limit_1d, np.nan)
+    z_reach_limit_1d = np.where(proj_1d > -5, z_reach_limit_1d, np.nan) # Start at crest
     
+    # Find where the mathematical reference line hits the topography
+    diff_1d = z_reach_limit_1d - z_topo_1d
+    hits_1d = np.where((diff_1d < 0) & (proj_1d > 2.0))[0]
+    if len(hits_1d) > 0:
+        stop_idx_1d = hits_1d[0]
+        z_reach_limit_1d[stop_idx_1d + 1:] = np.nan # Nullify everything past the intersection
+    
+    # === Nearest-Neighbor Masking for Composite Footprint ===
     mask_grid = Z_runout_surf.copy()
-    mask_grid[np.isnan(mask_grid)] = -9999
+    mask_grid[np.isnan(mask_grid)] = -99999
     
-    interp_mask = RegularGridInterpolator((x_1d, y_1d), mask_grid, bounds_error=False, fill_value=-9999)
+    interp_mask = RegularGridInterpolator(
+        (x_1d, y_1d), mask_grid, method='nearest', bounds_error=False, fill_value=-99999
+    )
     z_reach_contour_1d = interp_mask(pts)
-    z_deposit_1d = np.where(z_reach_contour_1d > -9999, z_reach_contour_1d, np.nan)
+    z_deposit_1d = np.where(z_reach_contour_1d > -50000, z_reach_contour_1d, np.nan)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=s_1d, y=z_topo_1d, mode='lines', name='Topography', line=dict(color='black', width=3)))
@@ -310,7 +333,7 @@ def render_cross_section(x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_
     )
     return fig
 
-def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z):
+def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z):
     fig = go.Figure()
 
     # Trace 0: Topography
@@ -338,18 +361,25 @@ def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_sur
         marker=dict(size=4, color='black'), name='Main Axis'
     ))
 
-    # Trace 4: Check Points (Discretized Source Centers) - Hidden by default
+    # Trace 4: Check Points (Discretized Source Centers)
     fig.add_trace(go.Scatter3d(
         x=pt_x, y=pt_y, z=pt_z, mode='markers',
         marker=dict(size=3, color='blue', opacity=0.8), name='Discretized Cells', visible=False
     ))
 
-    # Trace 5: Check Lines (Source to Toe projection paths) - Hidden by default
+    # Trace 5: Check Lines (Source to Toe projection paths)
     fig.add_trace(go.Scatter3d(
         x=check_x, y=check_y, z=check_z, mode='lines',
         line=dict(color='orange', width=2), name='Reach Projection Paths', visible=False
     ))
 
+    # Trace 6: Envelope Limit (Final Stopping Points Contour)
+    fig.add_trace(go.Scatter3d(
+        x=env_x, y=env_y, z=env_z, mode='lines+markers',
+        line=dict(color='yellow', width=5), marker=dict(size=4, color='red'), name='Final Points Envelope', visible=True
+    ))
+
+    # Update menus with 7 trace booleans
     fig.update_layout(
         title='3D Geometric Surface Model',
         scene=dict(xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Elevation (Z)', aspectmode='data'),
@@ -357,11 +387,11 @@ def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_sur
         updatemenus=[dict(
             type="buttons", direction="right", x=0.0, y=1.05, showactive=True,
             buttons=list([
-                dict(label="Show Results", method="update", args=[{"visible": [True, True, True, True, False, False]}]),
-                dict(label="Topo Only", method="update", args=[{"visible": [True, False, False, True, False, False]}]),
-                dict(label="Failure Mass Only", method="update", args=[{"visible": [True, True, False, True, False, False]}]),
-                dict(label="Deposit Only", method="update", args=[{"visible": [True, False, True, True, False, False]}]),
-                dict(label="Check Discretization", method="update", args=[{"visible": [True, False, False, True, True, True]}])
+                dict(label="Show Results", method="update", args=[{"visible": [True, True, True, True, False, False, True]}]),
+                dict(label="Topo Only", method="update", args=[{"visible": [True, False, False, True, False, False, False]}]),
+                dict(label="Failure Mass Only", method="update", args=[{"visible": [True, True, False, True, False, False, False]}]),
+                dict(label="Deposit Only", method="update", args=[{"visible": [True, False, True, True, False, False, True]}]),
+                dict(label="Check Discretization", method="update", args=[{"visible": [True, False, False, True, True, True, True]}])
             ])
         )]
     )

@@ -40,15 +40,15 @@ def index():
             rupture_df, topo_interp, friction_angle_deg=friction_angle
         )
         
-        # STEP 5: Angle of Reach footprint mapping and diagnostic trace evaluation
-        Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z = runout_physics.calculate_runout_surface(
+       # STEP 5: Angle of Reach footprint mapping and diagnostic trace evaluation
+        Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z = runout_physics.calculate_runout_surface(
             X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res
         )
         
-        # Render 3D scene including the "Check Discretization" arrays
+        # Render 3D scene including the "Check Discretization" arrays and the new Envelope limit
         fig_3d = runout_physics.render_topography_and_mass(
             X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, 
-            check_x, check_y, check_z, pt_x, pt_y, pt_z
+            check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z
         )
         plot_3d_html = fig_3d.to_html(full_html=False)
         

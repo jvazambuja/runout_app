@@ -2,167 +2,286 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Runout Analysis Interface</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Runout Propagation Model</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; display: flex; height: 100vh; }
-        
-        /* Sidebar styling */
-        .sidebar { width: 320px; background-color: #ffffff; padding: 25px; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 10; overflow-y: auto; }
-        
-        /* Main content and Tabs styling */
-        .main-content { flex-grow: 1; padding: 25px 25px 0 25px; display: flex; flex-direction: column; overflow-y: auto; }
-        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; flex-shrink: 0; }
-        .tab { padding: 12px 24px; cursor: pointer; font-weight: 600; color: #666; transition: 0.2s; border-bottom: 3px solid transparent; }
-        .tab:hover { color: #0056b3; }
-        .tab.active { border-bottom-color: #0056b3; color: #0056b3; }
-        .tab-content { display: none; flex-grow: 1; flex-direction: column; overflow-y: auto; }
-        .tab-content.active { display: flex; }
-        
-        /* Elements inside Analysis Tab */
-        .plot-container { flex-grow: 1; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 15px; margin-bottom: 20px; min-height: 500px; }
-        .volume-display { background-color: #e9ecef; padding: 15px; border-radius: 6px; text-align: center; margin-bottom: 25px; border-left: 4px solid #0056b3; flex-shrink: 0; }
-        .volume-display h3 { margin: 0; font-size: 1.8rem; color: #0056b3; }
-        .volume-display p { margin: 5px 0 0 0; color: #555; font-size: 0.9rem; }
-        
-        /* Elements inside Documentation Tab */
-        .tutorial-container { background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); line-height: 1.6; color: #333; max-width: 900px; margin-bottom: 20px; }
-        .tutorial-container h2 { color: #0056b3; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        .tutorial-container h3 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 30px; }
-        .tutorial-container ol { padding-left: 20px; }
-        .tutorial-container li { margin-bottom: 15px; }
-        .code-block { background-color: #f8f9fa; padding: 10px; border-radius: 4px; border: 1px solid #ddd; font-family: monospace; display: block; margin-top: 5px; }
-
-        /* Form styling */
-        h2.sidebar-title { font-size: 1.2rem; color: #333; margin-top: 0; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: 600; color: #444; font-size: 0.9rem; }
-        input[type="file"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button[type="submit"] { width: 100%; padding: 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; transition: 0.2s; }
-        button[type="submit"]:hover { background-color: #004494; }
-
-        /* Footer styling */
-        .footer { text-align: center; padding: 15px 0; font-size: 0.85rem; color: #777; margin-top: auto; border-top: 1px solid #ddd; flex-shrink: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; display: flex; flex-direction: column; min-height: 100vh;}
+        .container-fluid { flex: 1; }
+        .sidebar { background-color: #ffffff; padding: 25px; border-right: 1px solid #e0e0e0; height: 100vh; overflow-y: auto; }
+        .main-content { padding: 25px; height: 100vh; overflow-y: auto; }
+        .card { border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .nav-tabs .nav-link.active { font-weight: bold; color: #0056b3; border-bottom: 3px solid #0056b3; }
+        .nav-tabs .nav-link { color: #555; border: none; }
+        h4 { color: #333; margin-bottom: 20px; }
+        .doc-section { margin-bottom: 40px; }
+        .doc-section h5 { color: #0056b3; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .svg-container { text-align: center; margin: 20px 0; background: #fff; padding: 15px; border: 1px solid #eee; border-radius: 5px; }
+        .math-text { font-family: 'Courier New', Courier, monospace; background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
+        .code-block { background-color: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; font-family: monospace; }
+        footer { background-color: #ffffff; border-top: 1px solid #e0e0e0; padding: 15px 0; font-size: 0.9em; }
     </style>
 </head>
 <body>
 
-    <div class="sidebar">
-        <h2 class="sidebar-title">Analysis Parameters</h2>
-        <form method="POST" action="/" enctype="multipart/form-data">
-            <div class="form-group">
-                <label for="friction_angle">Basal Friction Angle (degrees):</label>
-                <input type="number" step="0.1" name="friction_angle" id="friction_angle" value="{{ friction_angle }}" required>
-            </div>
+<div class="container-fluid">
+    <div class="row">
+        <!-- Sidebar Configuration -->
+        <div class="col-md-3 sidebar">
+            <h4>Runout Model Parameters</h4>
+            <form method="POST" enctype="multipart/form-data">
+                <div class="form-group mt-4">
+                    <label for="friction_angle"><strong>Basal Friction Angle (&deg;):</strong></label>
+                    <input type="number" step="0.1" class="form-control" name="friction_angle" id="friction_angle" value="{{ friction_angle }}" required>
+                    <small class="form-text text-muted">Defines the lateral limits of the initial failure mass.</small>
+                </div>
 
-            <div class="form-group">
-                <label for="angle_of_reach">Minimum Angle of Reach (degrees):</label>
-                <input type="number" step="0.1" name="angle_of_reach" id="angle_of_reach" value="{{ angle_of_reach }}" required>
-            </div>
+                <div class="form-group mt-4">
+                    <label for="angle_of_reach"><strong>Angle of Reach (H/L) (&deg;):</strong></label>
+                    <input type="number" step="0.1" class="form-control" name="angle_of_reach" id="angle_of_reach" value="{{ angle_of_reach }}" required>
+                    <small class="form-text text-muted">Controls the maximum downslope travel distance.</small>
+                </div>
 
-            <div class="form-group">
-                <label for="angle_repose">Deposit Angle of Repose (degrees):</label>
-                <input type="number" step="0.1" name="angle_repose" id="angle_repose" value="{{ angle_repose }}" required>
-            </div>
+                <hr>
 
-            <div class="form-group">
-                <label for="dem_file">Upload Topography Mesh (.txt):</label>
-                <input type="file" name="dem_file" id="dem_file" accept=".txt,.csv">
+                <div class="form-group">
+                    <label for="dem_file"><strong>Topography (DEM) CSV:</strong></label>
+                    <input type="file" class="form-control-file" name="dem_file" id="dem_file" accept=".csv,.txt">
+                </div>
+
+                <div class="form-group">
+                    <label for="rupture_file"><strong>Rupture Axis CSV:</strong></label>
+                    <input type="file" class="form-control-file" name="rupture_file" id="rupture_file" accept=".csv,.txt">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block mt-4">Run Simulation</button>
+            </form>
+
+            <div class="card mt-4 bg-light">
+                <div class="card-body">
+                    <h5 class="card-title">Initial Volume</h5>
+                    <p class="card-text display-4 text-primary">
+                        {% if volume %}
+                            {{ "{:,.0f}".format(volume) }} m&sup3;
+                        {% else %}
+                            0 m&sup3;
+                        {% endif %}
+                    </p>
+                </div>
             </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="col-md-9 main-content">
+            <ul class="nav nav-tabs" id="myTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link active" id="3d-tab" data-toggle="tab" href="#view3d" role="tab">3D Runout Model</a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link" id="2d-tab" data-toggle="tab" href="#view2d" role="tab">2D Cross-Section</a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link" id="doc-tab" data-toggle="tab" href="#doc" role="tab">Methodology & Documentation</a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link" id="tutorial-tab" data-toggle="tab" href="#tutorial" role="tab">File Preparation Tutorial</a>
+                </li>
+            </ul>
             
-            <div class="form-group">
-                <label for="rupture_file">Upload Rupture Section (.txt):</label>
-                <input type="file" name="rupture_file" id="rupture_file" accept=".txt,.csv">
+            <div class="tab-content mt-4" id="myTabContent">
+                <!-- 3D View Tab -->
+                <div class="tab-pane fade show active" id="view3d" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body p-0">
+                            {% if plot_html %}
+                                {{ plot_html | safe }}
+                            {% else %}
+                                <div class="p-5 text-center text-muted">Run the simulation to generate the 3D model.</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2D View Tab -->
+                <div class="tab-pane fade" id="view2d" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body p-0">
+                            {% if plot_2d_html %}
+                                {{ plot_2d_html | safe }}
+                            {% else %}
+                                <div class="p-5 text-center text-muted">Run the simulation to generate the 2D cross-section.</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Documentation Tab -->
+                <div class="tab-pane fade" id="doc" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body">
+                            <h3 class="mb-4">Numerical Runout Propagation Architecture</h3>
+                            <p class="lead">This model utilizes a dual-resolution geometric approach to simulate landslide mass propagation, incorporating dynamic topographic routing and kinematic energy limits.</p>
+                            
+                            <div class="doc-section">
+                                <h5>1. Dual-Resolution Spatial Discretization</h5>
+                                <p>To maximize computational efficiency without sacrificing physical accuracy, the model decouples the topographic mesh from the source material mesh:</p>
+                                <ul>
+                                    <li><strong>Topographic Grid:</strong> The raw point cloud is dynamically remeshed into a continuous, structured grid using linear interpolation. This guarantees robust surface gradient calculations.</li>
+                                    <li><strong>Source Grid:</strong> The failure plane footprint is rigidly discretized at a strict <span class="math-text">0.5m</span> interval. This high-definition matrix ensures volumetric conservation and acts as the independent source points for the ray-tracing algorithm.</li>
+                                </ul>
+                            </div>
+
+                            <div class="doc-section">
+                                <h5>2. Kinematic Flow Routing (Steepest Descent with Momentum)</h5>
+                                <p>Unlike simplistic line-of-sight models that fail in complex valleys, this algorithm routes each discretized source cell independently using topographical gradient descent. To simulate geophysical inertia and prevent unrealistic stopping on flat plateaus or sudden zigzagging, a momentum blending factor is applied:</p>
+                                <ul>
+                                    <li><strong>Gradient Tracking:</strong> At each timestep, the local <span class="math-text">&Delta;z/&Delta;x</span> and <span class="math-text">&Delta;z/&Delta;y</span> dictate the theoretical flow direction.</li>
+                                    <li><strong>Vector Blending:</strong> The active travel vector is computed as <span class="math-text">V<sub>new</sub> = 0.6(Gradient) + 0.4(V<sub>old</sub>)</span>, smoothing the path through complex channels.</li>
+                                    <li><strong>Inertia:</strong> If the local gradient drops below a critical threshold (e.g., flat terrain), the mass preserves its preceding trajectory until the energy limit is exhausted.</li>
+                                </ul>
+                                
+                                <!-- Plan View SVG: Flow Routing -->
+                                <div class="svg-container">
+                                    <svg width="400" height="200" viewBox="0 0 400 200">
+                                        <!-- Topography contours -->
+                                        <path d="M 50 180 Q 200 120 350 180" fill="none" stroke="#ccc" stroke-width="2" stroke-dasharray="5,5"/>
+                                        <path d="M 50 140 Q 200 80 350 140" fill="none" stroke="#ccc" stroke-width="2" stroke-dasharray="5,5"/>
+                                        <path d="M 50 100 Q 200 40 350 100" fill="none" stroke="#ccc" stroke-width="2" stroke-dasharray="5,5"/>
+                                        
+                                        <!-- Source cell -->
+                                        <circle cx="80" cy="50" r="6" fill="blue" />
+                                        <text x="70" y="35" font-size="12" font-weight="bold">Source Cell</text>
+                                        
+                                        <!-- Direct Line of Sight (Fails) -->
+                                        <line x1="80" y1="50" x2="300" y2="50" stroke="red" stroke-width="2" stroke-dasharray="4,4"/>
+                                        <text x="310" y="55" font-size="12" fill="red">Rigid Ray (Collides)</text>
+                                        
+                                        <!-- Flow Routed Path -->
+                                        <path d="M 80 50 Q 120 120 200 130 T 320 160" fill="none" stroke="orange" stroke-width="3" />
+                                        <circle cx="320" cy="160" r="4" fill="red" />
+                                        <text x="310" y="180" font-size="12" font-weight="bold">Momentum-Routed Path</text>
+                                    </svg>
+                                    <p class="text-muted mt-2"><strong>Figure 1:</strong> Plan view demonstrating momentum-based flow routing vs. direct geometric projection.</p>
+                                </div>
+                            </div>
+
+                            <div class="doc-section">
+                                <h5>3. Energy Limits and Angle of Reach Envelopes</h5>
+                                <p>The travel distance of each independent flow path is strictly governed by the Angle of Reach <span class="math-text">(H/L)</span>, evaluated continuously along the 3D curvilinear path length. When the local elevation of the routed path exceeds the geometric reach limit, the trace halts.</p>
+                                <p>To reconstruct the final deposit, a <strong>Convex Hull</strong> algorithm computes the minimal enclosing polygon (envelope) containing all terminal stopping points. This guarantees a continuous, smooth deposit boundary that bridges numerical gaps caused by path divergence.</p>
+                                
+                                <!-- Plan View SVG: Convex Hull -->
+                                <div class="svg-container">
+                                    <svg width="400" height="200" viewBox="0 0 400 200">
+                                        <!-- Source Area -->
+                                        <ellipse cx="60" cy="100" rx="20" ry="40" fill="blue" opacity="0.3"/>
+                                        <text x="25" y="105" font-size="12" font-weight="bold" fill="#000">Source</text>
+                                        
+                                        <!-- Flow paths -->
+                                        <path d="M 70 80 Q 150 50 250 40" fill="none" stroke="orange" stroke-width="1" />
+                                        <path d="M 80 100 Q 180 100 280 100" fill="none" stroke="orange" stroke-width="1" />
+                                        <path d="M 70 120 Q 150 150 240 160" fill="none" stroke="orange" stroke-width="1" />
+                                        <path d="M 65 70 Q 120 20 200 30" fill="none" stroke="orange" stroke-width="1" />
+                                        <path d="M 65 130 Q 120 180 200 170" fill="none" stroke="orange" stroke-width="1" />
+                                        
+                                        <!-- Terminal Points -->
+                                        <circle cx="250" cy="40" r="3" fill="red" />
+                                        <circle cx="280" cy="100" r="3" fill="red" />
+                                        <circle cx="240" cy="160" r="3" fill="red" />
+                                        <circle cx="200" cy="30" r="3" fill="red" />
+                                        <circle cx="200" cy="170" r="3" fill="red" />
+                                        
+                                        <!-- Convex Hull Boundary -->
+                                        <polygon points="200,30 250,40 280,100 240,160 200,170 150,150 120,110 120,90 150,50" fill="teal" opacity="0.2" stroke="teal" stroke-width="3"/>
+                                        
+                                        <text x="260" y="140" font-size="12" font-weight="bold" fill="teal">Convex Hull Boundary</text>
+                                    </svg>
+                                    <p class="text-muted mt-2"><strong>Figure 2:</strong> Plan view of independent ray termination points mapped to a continuous composite footprint envelope.</p>
+                                </div>
+                            </div>
+                            
+                            <hr>
+                            <div class="doc-section">
+                                <h5>References</h5>
+                                <ul class="text-muted small">
+                                    <li>Corominas, J. (1996). <em>The angle of reach as a mobility index for small and large landslides</em>. Canadian Geotechnical Journal, 33(2), 260-271.</li>
+                                    <li>Hungr, O. (1995). <em>A model for the runout analysis of rapid flow slides, debris flows, and avalanches</em>. Canadian Geotechnical Journal, 32(4), 610-623.</li>
+                                    <li>Hunter, G., & Fell, R. (2003). <em>Travel distance angle for rapid landslides in constructed and natural soil slopes</em>. Canadian Geotechnical Journal, 40(6), 1123-1141.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tutorial Tab -->
+                <div class="tab-pane fade" id="tutorial" role="tabpanel">
+                    <div class="card">
+                        <div class="card-body">
+                            <h3 class="mb-4">File Preparation Tutorial (QGIS Workflow)</h3>
+                            <p>To run the simulation, you must provide two properly formatted CSV or TXT files: one for the topography and one for the rupture axis. Both files must contain explicitly defined <code>x, y, z</code> headers in the first row. You can easily prepare these files from standard CAD DXF formats using QGIS.</p>
+                            
+                            <div class="doc-section mt-4">
+                                <h5>1. Topography File (dem_mesh.csv)</h5>
+                                <p>This file defines the base terrain. Follow these steps to convert a topographic DXF mesh into the required format using QGIS:</p>
+                                <ol>
+                                    <li><strong>Import DXF:</strong> Drag and drop your topographic DXF file into QGIS. Select the appropriate vector layers containing the 3D elevation data (usually lines or 3D polygons).</li>
+                                    <li><strong>Extract Vertices:</strong> Open the Processing Toolbox (Ctrl+Alt+T) and search for <strong>Extract vertices</strong>. Run this tool on your DXF layer to convert the continuous geometry into individual point data.</li>
+                                    <li><strong>Add Geometry Attributes:</strong> In the Processing Toolbox, search for <strong>Add geometry attributes</strong>. Run this tool on the newly created "Vertices" layer. This calculates the exact spatial coordinates and adds them to the attribute table.</li>
+                                    <li><strong>Export to CSV:</strong> Right-click the resulting layer with the added attributes in the Layers panel and select <strong>Export &gt; Save Features As...</strong></li>
+                                    <li><strong>Format Settings:</strong>
+                                        <ul>
+                                            <li>Format: <strong>Comma Separated Value [CSV]</strong></li>
+                                            <li>Under the <em>Select fields to export and their export options</em> section, uncheck everything except the newly generated X, Y, and Z coordinate fields.</li>
+                                            <li>Ensure the exported file uses a comma separator.</li>
+                                        </ul>
+                                    </li>
+                                    <li><strong>Final Check:</strong> Open the exported file in a text editor or spreadsheet software and ensure the headers are exactly <code>x, y, z</code>.</li>
+                                </ol>
+                                
+                                <strong>Format Example:</strong>
+                                <div class="code-block mt-2 mb-3">
+x,y,z<br>
+500120.5,6300450.2,450.0<br>
+500125.5,6300450.2,448.5<br>
+500130.5,6300450.2,447.1<br>
+...
+                                </div>
+                            </div>
+
+                            <div class="doc-section">
+                                <h5>2. Rupture Axis File (rupture_section.csv)</h5>
+                                <p>This file defines the 2D longitudinal baseline of the initial failure mass. You can use the exact same QGIS workflow described above on a DXF containing a single 3D polyline representing the rupture axis.</p>
+                                <ul>
+                                    <li>The drawn line <strong>must be strictly ordered</strong> sequentially from the crest (highest elevation) down to the toe (lowest elevation) of the failure.</li>
+                                    <li>When drawing the polyline in CAD before exporting to DXF, ensure the vertices represent the absolute deepest expected failure plane elevation at that specific X/Y coordinate.</li>
+                                </ul>
+
+                                <strong>Format Example:</strong>
+                                <div class="code-block mt-2 mb-3">
+x,y,z<br>
+500150.0,6300480.0,460.0 &nbsp;&nbsp;&nbsp;&lt;-- Crest (Start)<br>
+500155.0,6300485.0,455.0<br>
+500160.0,6300490.0,452.0<br>
+500165.0,6300495.0,450.0 &nbsp;&nbsp;&nbsp;&lt;-- Toe (End)<br>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
-            
-            <button type="submit">Update & Calculate</button>
-        </form>
+        </div>
     </div>
+</div>
 
-    <div class="main-content">
-        <!-- Tab Navigation -->
-        <div class="tabs">
-            <div class="tab active" onclick="switchTab('analysis-tab', this)">3D Analysis Viewer</div>
-            <div class="tab" onclick="switchTab('cross-section-tab', this)">2D Cross-Section</div>
-            <div class="tab" onclick="switchTab('tutorial-tab', this)">Documentation</div>
-        </div>
-
-        <!-- Tab 1: 3D Analysis Output -->
-        <div id="analysis-tab" class="tab-content active">
-            <div class="volume-display">
-                <h3>{{ "%.2f"|format(volume) }} m³</h3>
-                <p>Calculated Initial Sliding Volume</p>
-            </div>
-            <div class="plot-container">
-                {{ plot_html | safe }}
-            </div>
-        </div>
-
-        <!-- Tab 2: 2D Cross-Section -->
-        <div id="cross-section-tab" class="tab-content">
-            <div class="plot-container">
-                {{ plot_2d_html | safe }}
-            </div>
-        </div>
-
-        <!-- Tab 3: Documentation & Tutorial -->
-        <div id="tutorial-tab" class="tab-content">
-            <div class="tutorial-container">
-                <h2>Software Documentation</h2>
-                
-                <h3>Methodology & Calculations</h3>
-                <p>This application utilizes a geometric mass-conservation approach for initial volume and an empirical angle-of-reach model for runout limits.</p>
-                <ul>
-                    <li><strong>Volume Calculation:</strong> The initial failure mass is computed by projecting the 2D rupture plane transversely. The lateral limits are defined by daylighting the surface against the topography at the specified <em>Basal Friction Angle</em>.</li>
-                    <li><strong>Footprint Limit (Angle of Reach):</strong> The absolute maximum boundary of the runout zone is calculated using the H/L angle-of-reach ratio evaluated using the highest source elevation (H) and the farthest deposit length (L)[cite: 1, 2]. Movement halts where the topography intersects this mathematical arctan(H/L) boundary.</li>
-                    <li><strong>Volume Compatibility & Repose:</strong> Inside the H/L footprint boundary, a true 3D deposit volume is reconstructed. A geometric capacity model inward-scales the deposit thickness such that final runout volume equals the initial volume. Slopes from the boundary inward are strictly prevented from overcoming the specified <em>Deposit Angle of Repose</em>.</li>
-                </ul>
-
-                <h3>Data Preparation (QGIS Tutorial)</h3>
-                <p>This application requires topographic and rupture plane data formatted as simple text files containing XYZ coordinates. If you have a `.dxf` file (commonly generated by CAD software or drone surveys), you can convert it to the required format using QGIS.</p>
-                
-                <ol>
-                    <li><strong>Import the DXF into QGIS:</strong> Drag and drop your `.dxf` file directly into the main workspace. Select the vector layers that contain your elevation contours or points.</li>
-                    <li><strong>Extract Vertices:</strong> Go to the top menu: <strong>Vector > Geometry Tools > Extract Vertices</strong>. Select your imported layer and click Run.</li>
-                    <li><strong>Add X, Y, and Z Attributes:</strong> Go to: <strong>Vector > Geometry Tools > Add Geometry Attributes</strong>. Select the Vertices layer and click Run. This creates a new layer with the exact X, Y, and Z values explicitly calculated for every point.</li>
-                    <li><strong>Export to Text/CSV:</strong> In the Layers panel on the left, right-click the "Added geom info" layer and select <strong>Export > Save Features As...</strong></li>
-                    <li><strong>Configure the Export Format:</strong> Set the Format to <strong>Comma Separated Value [CSV]</strong>. Under <em>Layer Options</em>, ensure <em>SEPARATOR</em> is set to <code>COMMA</code>. Under <em>Select fields to export</em>, uncheck everything except the new <strong>xcoord</strong>, <strong>ycoord</strong>, and <strong>zcoord</strong> columns.</li>
-                </ol>
-
-                <p>Once exported, you can rename the `.csv` file to `.txt`. The application expects the data to look like this:</p>
-                <span class="code-block">
-                    x,y,z<br>
-                    501234.12, 6789012.34, 150.5<br>
-                    501235.50, 6789013.00, 150.2<br>
-                    ...
-                </span>
-
-                <h3>References</h3>
-                <ul>
-                    <li>Reid et al (2025) - Grfin tools.pdf</li>
-                    <li>Reid et al (2026) - From start to stop_simple methods for mapping suceptibility to landslide runout and debris-flow inundation.pdf</li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Copyright Footer -->
-        <div class="footer">
-            &copy; 2026 João Vítor de Azambuja Carvalho. All rights reserved.
-        </div>
+<footer class="text-center text-muted">
+    <div class="container">
+        <small>&copy; 2026 Runout Propagation Model. All rights reserved.</small>
     </div>
+</footer>
 
-    <!-- Simple script to handle tab switching -->
-    <script>
-        function switchTab(tabId, element) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            document.getElementById(tabId).classList.add('active');
-            element.classList.add('active');
-        }
-    </script>
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>
