@@ -69,6 +69,41 @@
                     </p>
                 </div>
             </div>
+
+            <!-- EXPORT SECTION (Only visible if results exist in cache) -->
+            {% if has_results %}
+            <div class="card mt-4 border-success">
+                <div class="card-header bg-success text-white">
+                    <strong>Export Results</strong>
+                </div>
+                <div class="card-body">
+                    
+                    <!-- MADFlow Export -->
+                    <a href="/export/madflow" class="btn btn-outline-dark btn-sm btn-block mb-2 text-left">
+                        &#128229; Export input surfaces to MADFlow (.zip)
+                    </a>
+                    
+                    <!-- DXF Export -->
+                    <a href="/export/dxf" class="btn btn-outline-dark btn-sm btn-block mb-3 text-left">
+                        &#128229; Export results to DXF
+                    </a>
+                    
+                    <hr>
+                    
+                    <!-- CSV Export Form -->
+                    <form action="/export/csv" method="POST">
+                        <label for="surface_type" class="small font-weight-bold">Export surface as XYZ CSV:</label>
+                        <select class="form-control form-control-sm mb-2" name="surface_type" id="surface_type">
+                            <option value="topography">Base Topography</option>
+                            <option value="failure">Initial Failure Surface</option>
+                            <option value="runout">Runout Footprint</option>
+                        </select>
+                        <button type="submit" class="btn btn-secondary btn-sm btn-block">Export to CSV</button>
+                    </form>
+
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Main Content Area -->

@@ -1,9 +1,13 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file, redirect, url_for
 import pandas as pd
 import traceback
 import runout_physics 
 
 app = Flask(__name__)
+app.secret_key = 'super_secret_key_for_flash_messages'
+
+# Global cache to hold the latest simulation results for exporting
+sim_cache = {}
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -32,27 +36,31 @@ def index():
             dem_df = pd.read_csv('dem_mesh.txt')
             rupture_df = pd.read_csv('rupture_section.txt')
 
-        # STEPS 1 & 2: Read Topography and Remesh
         x_1d, y_1d, X_grid, Y_grid, grid_z, topo_interp, topo_res = runout_physics.build_structured_topo(dem_df)
 
-        # STEPS 3 & 4: Discretize the Failure Plane
         volume, X_surf, Y_surf, Z_surf = runout_physics.discretize_failure_plane(
             rupture_df, topo_interp, friction_angle_deg=friction_angle
         )
         
-       # STEP 5: Angle of Reach footprint mapping and diagnostic trace evaluation
         Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z = runout_physics.calculate_runout_surface(
             X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res
         )
         
-        # Render 3D scene including the "Check Discretization" arrays and the new Envelope limit
+        # --- CACHE RESULTS FOR EXPORTING ---
+        sim_cache.clear()
+        sim_cache.update({
+            'x_1d': x_1d, 'y_1d': y_1d, 'X_grid': X_grid, 'Y_grid': Y_grid,
+            'grid_z': grid_z, 'X_surf': X_surf, 'Y_surf': Y_surf, 'Z_surf': Z_surf, 
+            'Z_runout_surf': Z_runout_surf, 'topo_res': topo_res
+        })
+        # -----------------------------------
+
         fig_3d = runout_physics.render_topography_and_mass(
             X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, 
             check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z
         )
         plot_3d_html = fig_3d.to_html(full_html=False)
         
-        # Render 2D cross-section
         fig_2d = runout_physics.render_cross_section(
             x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_runout_surf
         )
@@ -63,12 +71,44 @@ def index():
 
     return render_template(
         'index.html', 
-        plot_html=plot_3d_html, 
-        plot_2d_html=plot_2d_html, 
-        volume=volume, 
-        friction_angle=friction_angle, 
-        angle_of_reach=angle_of_reach
+        plot_html=plot_3d_html, plot_2d_html=plot_2d_html, 
+        volume=volume, friction_angle=friction_angle, angle_of_reach=angle_of_reach,
+        has_results=bool(sim_cache) 
     )
+
+# --- EXPORT ENDPOINTS ---
+
+@app.route('/export/madflow')
+def export_madflow():
+    if not sim_cache: return redirect(url_for('index'))
+    zip_io = runout_physics.export_madflow_asc(
+        sim_cache['x_1d'], sim_cache['y_1d'], sim_cache['X_grid'], sim_cache['Y_grid'],
+        sim_cache['grid_z'], sim_cache['X_surf'], sim_cache['Y_surf'], sim_cache['Z_surf'], 
+        sim_cache['topo_res']
+    )
+    return send_file(zip_io, mimetype='application/zip', as_attachment=True, download_name='MADFlow_Inputs.zip')
+
+@app.route('/export/dxf')
+def export_dxf():
+    if not sim_cache: return redirect(url_for('index'))
+    dxf_io = runout_physics.export_to_dxf(
+        sim_cache['X_grid'], sim_cache['Y_grid'], sim_cache['grid_z'], 
+        sim_cache['X_surf'], sim_cache['Y_surf'], sim_cache['Z_surf'], 
+        sim_cache['Z_runout_surf']
+    )
+    return send_file(dxf_io, mimetype='application/dxf', as_attachment=True, download_name='runout_results.dxf')
+
+@app.route('/export/csv', methods=['POST'])
+def export_csv():
+    if not sim_cache: return redirect(url_for('index'))
+    surface_type = request.form.get('surface_type')
+    csv_io = runout_physics.export_to_csv(
+        surface_type, sim_cache['X_grid'], sim_cache['Y_grid'], sim_cache['grid_z'], 
+        sim_cache['X_surf'], sim_cache['Y_surf'], sim_cache['Z_surf'], 
+        sim_cache['Z_runout_surf']
+    )
+    filename = f"{surface_type}_surface.csv"
+    return send_file(csv_io, mimetype='text/csv', as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

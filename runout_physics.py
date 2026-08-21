@@ -4,6 +4,10 @@ from scipy.interpolate import griddata, RegularGridInterpolator
 from scipy.spatial import ConvexHull
 import plotly.graph_objects as go
 
+import ezdxf
+import io
+import zipfile
+
 GRID_RES_SOURCE = 0.5
 
 # ==========================================
@@ -396,3 +400,111 @@ def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_sur
         )]
     )
     return fig
+# ==========================================
+# EXPORT WORKFLOWS
+# ==========================================
+
+def export_madflow_asc(x_1d, y_1d, X_grid, Y_grid, grid_z, X_surf, Y_surf, Z_surf, topo_res):
+    """
+    Generates ESRI ASCII (.asc) strings for MADFlow.
+    Interpolates the local failure surface onto the global grid to carve out the volume.
+    """
+    valid_mask = ~np.isnan(Z_surf)
+    xs_valid = X_surf[valid_mask]
+    ys_valid = Y_surf[valid_mask]
+    zs_valid = Z_surf[valid_mask]
+    
+    z_after_failure = np.copy(grid_z)
+    
+    if len(xs_valid) > 0:
+        # Interpolate the 0.5m failure surface elevations onto the global topographic grid
+        z_surf_global = griddata((xs_valid, ys_valid), zs_valid, (X_grid, Y_grid), method='linear')
+        
+        # Where the failure surface exists, take the lower elevation (carving the volume)
+        valid_interp = ~np.isnan(z_surf_global)
+        z_after_failure[valid_interp] = np.minimum(grid_z[valid_interp], z_surf_global[valid_interp])
+    
+    def build_asc_string(z_matrix):
+        ncols = len(x_1d)
+        nrows = len(y_1d)
+        xllcorner = x_1d[0]
+        yllcorner = y_1d[0]
+        nodata = -9999
+        
+        header = f"ncols         {ncols}\n"
+        header += f"nrows         {nrows}\n"
+        header += f"xllcorner     {xllcorner}\n"
+        header += f"yllcorner     {yllcorner}\n"
+        header += f"cellsize      {topo_res}\n"
+        header += f"NODATA_value  {nodata}\n"
+        
+        # ASC format writes rows from Top-Left (Max Y, Min X) downwards
+        data_lines = []
+        for j in range(nrows - 1, -1, -1):
+            row_data = z_matrix[:, j]
+            row_clean = np.where(np.isnan(row_data), nodata, row_data)
+            line = " ".join([f"{val:.3f}" for val in row_clean])
+            data_lines.append(line)
+            
+        return header + "\n".join(data_lines)
+
+    base_asc = build_asc_string(grid_z)
+    after_failure_asc = build_asc_string(z_after_failure)
+    
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('base.asc', base_asc)
+        zf.writestr('after_failure.asc', after_failure_asc)
+    memory_file.seek(0)
+    
+    return memory_file
+
+def export_to_dxf(X_grid, Y_grid, grid_z, X_surf, Y_surf, Z_surf, Z_runout_surf):
+    """Exports to DXF, correctly pairing the distinct grid resolutions."""
+    doc = ezdxf.new('R2010')
+    msp = doc.modelspace()
+    
+    doc.layers.add(name='TOPOGRAPHY', color=7)
+    doc.layers.add(name='FAILURE_SURFACE', color=1)
+    doc.layers.add(name='RUNOUT_FOOTPRINT', color=3)
+    
+    def add_grid_to_dxf(xs, ys, zs, layer_name):
+        valid = ~np.isnan(zs)
+        xv, yv, zv = xs[valid], ys[valid], zs[valid]
+        for x, y, z in zip(xv, yv, zv):
+            msp.add_point((x, y, z), dxfattribs={'layer': layer_name})
+
+    add_grid_to_dxf(X_grid, Y_grid, grid_z, 'TOPOGRAPHY')
+    add_grid_to_dxf(X_surf, Y_surf, Z_surf, 'FAILURE_SURFACE')
+    add_grid_to_dxf(X_grid, Y_grid, Z_runout_surf, 'RUNOUT_FOOTPRINT')
+    
+    memory_file = io.StringIO()
+    doc.write(memory_file)
+    memory_file.seek(0)
+    
+    bytes_io = io.BytesIO(memory_file.getvalue().encode('utf-8'))
+    return bytes_io
+
+def export_to_csv(surface_type, X_grid, Y_grid, grid_z, X_surf, Y_surf, Z_surf, Z_runout_surf):
+    """Exports CSV, pairing the correct X, Y vectors to the requested Z surface."""
+    if surface_type == 'topography':
+        tx, ty, tz = X_grid, Y_grid, grid_z
+    elif surface_type == 'failure':
+        tx, ty, tz = X_surf, Y_surf, Z_surf
+    elif surface_type == 'runout':
+        tx, ty, tz = X_grid, Y_grid, Z_runout_surf
+    else:
+        raise ValueError("Invalid surface type selected.")
+        
+    valid = ~np.isnan(tz)
+    df = pd.DataFrame({
+        'x': tx[valid],
+        'y': ty[valid],
+        'z': tz[valid]
+    })
+    
+    memory_file = io.BytesIO()
+    df.to_csv(memory_file, index=False)
+    memory_file.seek(0)
+    
+    return memory_file
