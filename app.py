@@ -1,20 +1,19 @@
 from flask import Flask, render_template, request
 import pandas as pd
+import traceback
 import runout_physics 
 
 app = Flask(__name__)
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    friction_angle = 30.0
-    runout_distance = 60.0
-    angle_repose = 20.0
-    
     try:
+        angle_of_reach = 20.0
+        friction_angle = 30.0
+        
         if request.method == 'POST':
+            angle_of_reach = float(request.form.get('angle_of_reach', 20.0))
             friction_angle = float(request.form.get('friction_angle', 30.0))
-            runout_distance = float(request.form.get('runout_distance', 60.0))
-            angle_repose = float(request.form.get('angle_repose', 20.0))
             
             dem_file = request.files.get('dem_file')
             rupture_file = request.files.get('rupture_file')
@@ -28,40 +27,47 @@ def index():
                 rupture_df = pd.read_csv(rupture_file)
             else:
                 rupture_df = pd.read_csv('rupture_section.txt')
+                
         else:
             dem_df = pd.read_csv('dem_mesh.txt')
             rupture_df = pd.read_csv('rupture_section.txt')
 
-            
-        # 1. Calculate Initial Mass
-        volume, X_surf, Y_surf, Z_surf = runout_physics.calculate_sliding_volume(
-            dem_df, rupture_df, friction_angle_deg=friction_angle
+        # STEPS 1 & 2: Read Topography and Remesh
+        x_1d, y_1d, X_grid, Y_grid, grid_z, topo_interp, topo_res = runout_physics.build_structured_topo(dem_df)
+
+        # STEPS 3 & 4: Discretize the Failure Plane
+        volume, X_surf, Y_surf, Z_surf = runout_physics.discretize_failure_plane(
+            rupture_df, topo_interp, friction_angle_deg=friction_angle
         )
         
-        # 2. Propagate and Calculate Deposit
-        X_dep, Y_dep, Z_dep, z_peak_opt, s_peak_opt = runout_physics.calculate_deposit_surface(
-            dem_df, rupture_df, runout_distance, volume, angle_repose
+        # STEP 5: Angle of Reach footprint mapping and diagnostic trace evaluation
+        Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z = runout_physics.calculate_runout_surface(
+            X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res
         )
         
-        # 3. Render 3D and 2D figures
+        # Render 3D scene including the "Check Discretization" arrays
         fig_3d = runout_physics.render_topography_and_mass(
-            dem_df, rupture_df, X_surf, Y_surf, Z_surf, X_dep, Y_dep, Z_dep
+            X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, 
+            check_x, check_y, check_z, pt_x, pt_y, pt_z
         )
         plot_3d_html = fig_3d.to_html(full_html=False)
         
-        # Notice s_peak_opt is added to the end of this function call
+        # Render 2D cross-section
         fig_2d = runout_physics.render_cross_section(
-            dem_df, rupture_df, runout_distance, angle_repose, z_peak_opt, s_peak_opt
+            x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_runout_surf
         )
         plot_2d_html = fig_2d.to_html(full_html=False)
         
     except Exception as e:
-        return f"An error occurred processing the data: {e}"
+        return f"An error occurred processing the data: {e} <br><br><b>Stack Trace:</b><br><pre>{traceback.format_exc()}</pre>"
 
     return render_template(
-        'index.html', plot_html=plot_3d_html, plot_2d_html=plot_2d_html, 
-        volume=volume, friction_angle=friction_angle, 
-        runout_distance=runout_distance, angle_repose=angle_repose
+        'index.html', 
+        plot_html=plot_3d_html, 
+        plot_2d_html=plot_2d_html, 
+        volume=volume, 
+        friction_angle=friction_angle, 
+        angle_of_reach=angle_of_reach
     )
 
 if __name__ == '__main__':

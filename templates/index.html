@@ -10,23 +10,23 @@
         .sidebar { width: 320px; background-color: #ffffff; padding: 25px; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 10; overflow-y: auto; }
         
         /* Main content and Tabs styling */
-        .main-content { flex-grow: 1; padding: 25px; display: flex; flex-direction: column; overflow-y: auto; }
-        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
+        .main-content { flex-grow: 1; padding: 25px 25px 0 25px; display: flex; flex-direction: column; overflow-y: auto; }
+        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; flex-shrink: 0; }
         .tab { padding: 12px 24px; cursor: pointer; font-weight: 600; color: #666; transition: 0.2s; border-bottom: 3px solid transparent; }
         .tab:hover { color: #0056b3; }
         .tab.active { border-bottom-color: #0056b3; color: #0056b3; }
-        .tab-content { display: none; flex-grow: 1; flex-direction: column; }
+        .tab-content { display: none; flex-grow: 1; flex-direction: column; overflow-y: auto; }
         .tab-content.active { display: flex; }
         
         /* Elements inside Analysis Tab */
-        .plot-container { flex-grow: 1; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 15px; }
-        .volume-display { background-color: #e9ecef; padding: 15px; border-radius: 6px; text-align: center; margin-bottom: 25px; border-left: 4px solid #0056b3; }
+        .plot-container { flex-grow: 1; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 15px; margin-bottom: 20px; min-height: 500px; }
+        .volume-display { background-color: #e9ecef; padding: 15px; border-radius: 6px; text-align: center; margin-bottom: 25px; border-left: 4px solid #0056b3; flex-shrink: 0; }
         .volume-display h3 { margin: 0; font-size: 1.8rem; color: #0056b3; }
         .volume-display p { margin: 5px 0 0 0; color: #555; font-size: 0.9rem; }
         
-        /* Elements inside Tutorial Tab */
-        .tutorial-container { background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); line-height: 1.6; color: #333; max-width: 800px; }
-        .tutorial-container h2 { color: #0056b3; margin-top: 0; }
+        /* Elements inside Documentation Tab */
+        .tutorial-container { background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); line-height: 1.6; color: #333; max-width: 900px; margin-bottom: 20px; }
+        .tutorial-container h2 { color: #0056b3; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; }
         .tutorial-container h3 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 30px; }
         .tutorial-container ol { padding-left: 20px; }
         .tutorial-container li { margin-bottom: 15px; }
@@ -39,6 +39,9 @@
         input[type="file"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         button[type="submit"] { width: 100%; padding: 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; transition: 0.2s; }
         button[type="submit"]:hover { background-color: #004494; }
+
+        /* Footer styling */
+        .footer { text-align: center; padding: 15px 0; font-size: 0.85rem; color: #777; margin-top: auto; border-top: 1px solid #ddd; flex-shrink: 0; }
     </style>
 </head>
 <body>
@@ -50,10 +53,10 @@
                 <label for="friction_angle">Basal Friction Angle (degrees):</label>
                 <input type="number" step="0.1" name="friction_angle" id="friction_angle" value="{{ friction_angle }}" required>
             </div>
-            
+
             <div class="form-group">
-                <label for="runout_distance">Target Runout Distance (m):</label>
-                <input type="number" step="0.1" name="runout_distance" id="runout_distance" value="{{ runout_distance }}" required>
+                <label for="angle_of_reach">Minimum Angle of Reach (degrees):</label>
+                <input type="number" step="0.1" name="angle_of_reach" id="angle_of_reach" value="{{ angle_of_reach }}" required>
             </div>
 
             <div class="form-group">
@@ -80,7 +83,7 @@
         <div class="tabs">
             <div class="tab active" onclick="switchTab('analysis-tab', this)">3D Analysis Viewer</div>
             <div class="tab" onclick="switchTab('cross-section-tab', this)">2D Cross-Section</div>
-            <div class="tab" onclick="switchTab('tutorial-tab', this)">Data Preparation Tutorial</div>
+            <div class="tab" onclick="switchTab('tutorial-tab', this)">Documentation</div>
         </div>
 
         <!-- Tab 1: 3D Analysis Output -->
@@ -101,64 +104,65 @@
             </div>
         </div>
 
-        <!-- Tab 3: QGIS Tutorial -->
+        <!-- Tab 3: Documentation & Tutorial -->
         <div id="tutorial-tab" class="tab-content">
             <div class="tutorial-container">
-                <h2>How to Prepare Input Files using QGIS</h2>
-                <p>This application requires topographic and rupture plane data formatted as simple text files containing XYZ coordinates. If you have a `.dxf` file (commonly generated by CAD software or drone surveys), you can convert it to the required format using QGIS, a free and open-source Geographic Information System.</p>
+                <h2>Software Documentation</h2>
                 
-                <h3>Step-by-Step Conversion</h3>
+                <h3>Methodology & Calculations</h3>
+                <p>This application utilizes a geometric mass-conservation approach for initial volume and an empirical angle-of-reach model for runout limits.</p>
+                <ul>
+                    <li><strong>Volume Calculation:</strong> The initial failure mass is computed by projecting the 2D rupture plane transversely. The lateral limits are defined by daylighting the surface against the topography at the specified <em>Basal Friction Angle</em>.</li>
+                    <li><strong>Footprint Limit (Angle of Reach):</strong> The absolute maximum boundary of the runout zone is calculated using the H/L angle-of-reach ratio evaluated using the highest source elevation (H) and the farthest deposit length (L)[cite: 1, 2]. Movement halts where the topography intersects this mathematical arctan(H/L) boundary.</li>
+                    <li><strong>Volume Compatibility & Repose:</strong> Inside the H/L footprint boundary, a true 3D deposit volume is reconstructed. A geometric capacity model inward-scales the deposit thickness such that final runout volume equals the initial volume. Slopes from the boundary inward are strictly prevented from overcoming the specified <em>Deposit Angle of Repose</em>.</li>
+                </ul>
+
+                <h3>Data Preparation (QGIS Tutorial)</h3>
+                <p>This application requires topographic and rupture plane data formatted as simple text files containing XYZ coordinates. If you have a `.dxf` file (commonly generated by CAD software or drone surveys), you can convert it to the required format using QGIS.</p>
+                
                 <ol>
-                    <li><strong>Import the DXF into QGIS</strong>
-                        <br>Open QGIS. Drag and drop your `.dxf` file directly into the main workspace. When prompted, select the vector layers that contain your elevation contours or points.</li>
-                    
-                    <li><strong>Extract Vertices</strong>
-                        <br>If your DXF contains contour lines or polygons, you need to break them down into individual points. 
-                        <br>Go to the top menu: <strong>Vector > Geometry Tools > Extract Vertices</strong>. Select your imported layer and click Run.</li>
-                    
-                    <li><strong>Add X, Y, and Z Attributes</strong>
-                        <br>The newly created "Vertices" layer has geometric points, but their coordinates are not yet written into a readable data table.
-                        <br>Go to: <strong>Vector > Geometry Tools > Add Geometry Attributes</strong>. Select the Vertices layer and click Run. This creates a new layer with the exact X, Y, and Z values explicitly calculated for every point.</li>
-                    
-                    <li><strong>Export to Text/CSV</strong>
-                        <br>In the Layers panel on the left, right-click the "Added geom info" layer and select <strong>Export > Save Features As...</strong></li>
-                    
-                    <li><strong>Configure the Export Format</strong>
-                        <br>In the export window, set the Format to <strong>Comma Separated Value [CSV]</strong>. 
-                        <br>Under <em>Layer Options</em>, look for the <em>SEPARATOR</em> field and ensure it is set to <code>COMMA</code>. 
-                        <br>Under <em>Select fields to export</em>, uncheck everything except the new <strong>xcoord</strong>, <strong>ycoord</strong>, and <strong>zcoord</strong> columns.</li>
+                    <li><strong>Import the DXF into QGIS:</strong> Drag and drop your `.dxf` file directly into the main workspace. Select the vector layers that contain your elevation contours or points.</li>
+                    <li><strong>Extract Vertices:</strong> Go to the top menu: <strong>Vector > Geometry Tools > Extract Vertices</strong>. Select your imported layer and click Run.</li>
+                    <li><strong>Add X, Y, and Z Attributes:</strong> Go to: <strong>Vector > Geometry Tools > Add Geometry Attributes</strong>. Select the Vertices layer and click Run. This creates a new layer with the exact X, Y, and Z values explicitly calculated for every point.</li>
+                    <li><strong>Export to Text/CSV:</strong> In the Layers panel on the left, right-click the "Added geom info" layer and select <strong>Export > Save Features As...</strong></li>
+                    <li><strong>Configure the Export Format:</strong> Set the Format to <strong>Comma Separated Value [CSV]</strong>. Under <em>Layer Options</em>, ensure <em>SEPARATOR</em> is set to <code>COMMA</code>. Under <em>Select fields to export</em>, uncheck everything except the new <strong>xcoord</strong>, <strong>ycoord</strong>, and <strong>zcoord</strong> columns.</li>
                 </ol>
 
-                <h3>Final File Format</h3>
-                <p>Once exported, you can rename the `.csv` file to `.txt` if you prefer. The application expects the data to look like this:</p>
+                <p>Once exported, you can rename the `.csv` file to `.txt`. The application expects the data to look like this:</p>
                 <span class="code-block">
                     x,y,z<br>
                     501234.12, 6789012.34, 150.5<br>
                     501235.50, 6789013.00, 150.2<br>
                     ...
                 </span>
-                <p>You can repeat this exact process to draw and export your 2D Rupture Section line.</p>
+
+                <h3>References</h3>
+                <ul>
+                    <li>Reid et al (2025) - Grfin tools.pdf</li>
+                    <li>Reid et al (2026) - From start to stop_simple methods for mapping suceptibility to landslide runout and debris-flow inundation.pdf</li>
+                </ul>
             </div>
+        </div>
+
+        <!-- Copyright Footer -->
+        <div class="footer">
+            &copy; 2026 João Vítor de Azambuja Carvalho. All rights reserved.
         </div>
     </div>
 
     <!-- Simple script to handle tab switching -->
     <script>
         function switchTab(tabId, element) {
-            // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
-            // Remove active class from all tabs
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             
-            // Show the selected tab content and highlight the clicked tab
             document.getElementById(tabId).classList.add('active');
             element.classList.add('active');
         }
     </script>
 </body>
-</html>
 </html>

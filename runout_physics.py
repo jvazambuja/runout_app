@@ -1,276 +1,267 @@
 import numpy as np
 import pandas as pd
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import griddata, RegularGridInterpolator
 import plotly.graph_objects as go
-from scipy.optimize import brentq
 
-# 1. Define a unified discretization resolution (e.g., 0.5 meters)
-# This controls both the calculation nodes and the visual mesh density
-GRID_RES = 0.5 
+GRID_RES_SOURCE = 0.5
 
-def calculate_sliding_volume(dem_df, rupture_df, friction_angle_deg, grid_res=GRID_RES):
-    """
-    Calculates the sliding volume and returns the 3D surface grid.
-    This version mathematically resamples the rupture line to match the grid resolution.
-    """
+# ==========================================
+# STEPS 1 & 2: Read and Remesh Topography
+# ==========================================
+def build_structured_topo(dem_df, max_points=25000):
+    x_min, x_max = dem_df['x'].min(), dem_df['x'].max()
+    y_min, y_max = dem_df['y'].min(), dem_df['y'].max()
+    
+    area = (x_max - x_min) * (y_max - y_min)
+    topo_res = np.sqrt(area / max_points)
+    topo_res = max(topo_res, 1.0) 
+    
+    x_1d = np.arange(x_min, x_max + topo_res, topo_res)
+    y_1d = np.arange(y_min, y_max + topo_res, topo_res)
+    
+    grid_x, grid_y = np.meshgrid(x_1d, y_1d, indexing='ij')
+    
     points = dem_df[['x', 'y']].values
     values = dem_df['z'].values
-    topo_interp = LinearNDInterpolator(points, values)
     
-    # 1. Extract the raw input coordinates
-    rx_orig = rupture_df['x'].values
-    ry_orig = rupture_df['y'].values
-    rz_orig = rupture_df['z'].values
+    grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
     
-    # 2. Calculate the cumulative distance of the raw input line
-    orig_dist = np.zeros(len(rx_orig))
-    for i in range(1, len(rx_orig)):
-        orig_dist[i] = orig_dist[i-1] + np.sqrt((rx_orig[i]-rx_orig[i-1])**2 + (ry_orig[i]-ry_orig[i-1])**2)
+    nan_mask = np.isnan(grid_z)
+    if np.any(nan_mask):
+        grid_z_nearest = griddata(points, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
+        grid_z[nan_mask] = grid_z_nearest
         
-    # 3. Create a high-resolution distance array using the exact GRID_RES step
-    # We add a tiny buffer (grid_res/10) to ensure the very last point is included
-    resampled_dist = np.arange(0, orig_dist[-1] + grid_res/10, grid_res)
+    topo_interp = RegularGridInterpolator((x_1d, y_1d), grid_z, bounds_error=False, fill_value=np.nan)
     
-    # 4. Interpolate the original points onto this new high-resolution line
-    rx = np.interp(resampled_dist, orig_dist, rx_orig)
-    ry = np.interp(resampled_dist, orig_dist, ry_orig)
-    rz = np.interp(resampled_dist, orig_dist, rz_orig)
-    
+    return x_1d, y_1d, grid_x, grid_y, grid_z, topo_interp, topo_res
+
+# ==========================================
+# STEPS 3 & 4: Read and Discretize Failure Plane
+# ==========================================
+def discretize_failure_plane(rupture_df, topo_interp, friction_angle_deg, source_res=GRID_RES_SOURCE):
+    rx = rupture_df['x'].values
+    ry = rupture_df['y'].values
+    rz = rupture_df['z'].values
     num_points = len(rx)
+    
     tan_phi = np.tan(np.radians(friction_angle_deg))
-    cross_section_areas = np.zeros(num_points)
-    cumulative_distance = resampled_dist # We already have our high-res distances!
     
-    # Transverse calculation array using the exact discretization step
-    s_vals = np.arange(-200, 200 + grid_res/2, grid_res)
+    orig_dist = np.zeros(num_points)
+    for i in range(1, num_points):
+        orig_dist[i] = orig_dist[i-1] + np.sqrt((rx[i]-rx[i-1])**2 + (ry[i]-ry[i-1])**2)
+        
+    resampled_dist = np.arange(0, orig_dist[-1] + source_res/10, source_res)
+    rx_rs = np.interp(resampled_dist, orig_dist, rx)
+    ry_rs = np.interp(resampled_dist, orig_dist, ry)
+    rz_rs = np.interp(resampled_dist, orig_dist, rz)
     
-    X_surf = np.full((num_points, len(s_vals)), np.nan)
-    Y_surf = np.full((num_points, len(s_vals)), np.nan)
-    Z_surf = np.full((num_points, len(s_vals)), np.nan)
+    num_rs = len(rx_rs)
+    cross_section_areas = np.zeros(num_rs) 
     
-    for i in range(num_points):
-        # Calculate the normal vector using adjacent points on the high-res line
-        if i < num_points - 1:
-            dx = rx[i+1] - rx[i]
-            dy = ry[i+1] - ry[i]
+    s_vals = np.arange(-200, 200 + source_res/2, source_res)
+    
+    X_surf = np.full((num_rs, len(s_vals)), np.nan)
+    Y_surf = np.full((num_rs, len(s_vals)), np.nan)
+    Z_surf = np.full((num_rs, len(s_vals)), np.nan)
+    
+    for i in range(num_rs):
+        if i < num_rs - 1:
+            dx, dy = rx_rs[i+1] - rx_rs[i], ry_rs[i+1] - ry_rs[i]
         else:
-            dx = rx[i] - rx[i-1]
-            dy = ry[i] - ry[i-1]
+            dx, dy = rx_rs[i] - rx_rs[i-1], ry_rs[i] - ry_rs[i-1]
             
         length = np.sqrt(dx**2 + dy**2)
         if length == 0: continue
         
-        nx = -dy / length
-        ny = dx / length
+        nx, ny = -dy / length, dx / length
+        z_top_center = topo_interp(np.array([[rx_rs[i], ry_rs[i]]]))[0]
         
-        z_top_center = topo_interp(rx[i], ry[i])
         if np.isnan(z_top_center): continue
-            
-        H = z_top_center - rz[i]
+        H = z_top_center - rz_rs[i]
         if H <= 0: continue
             
-        transverse_x = rx[i] + s_vals * nx
-        transverse_y = ry[i] + s_vals * ny
-        z_top = topo_interp(transverse_x, transverse_y)
+        transverse_x = rx_rs[i] + s_vals * nx
+        transverse_y = ry_rs[i] + s_vals * ny
         
-        z_base = np.zeros_like(s_vals)
-        for idx, s in enumerate(s_vals):
-            if abs(s) <= H:
-                z_base[idx] = rz[i]
-            else:
-                z_base[idx] = rz[i] + (abs(s) - H) * tan_phi
-                
+        pts = np.stack((transverse_x, transverse_y), axis=-1)
+        z_top = topo_interp(pts)
+        
+        z_base = np.where(np.abs(s_vals) <= H, rz_rs[i], rz_rs[i] + (np.abs(s_vals) - H) * tan_phi)
         thickness = z_top - z_base
         
         center_idx = len(s_vals) // 2
-        if np.isnan(thickness[center_idx]) or thickness[center_idx] <= 0:
-            continue
+        if np.isnan(thickness[center_idx]) or thickness[center_idx] <= 0: continue
             
-        left_idx = center_idx
-        while left_idx > 0 and thickness[left_idx] > 0 and not np.isnan(thickness[left_idx]):
-            left_idx -= 1
-            
-        right_idx = center_idx
-        while right_idx < len(s_vals) - 1 and thickness[right_idx] > 0 and not np.isnan(thickness[right_idx]):
-            right_idx += 1
+        left_idx, right_idx = center_idx, center_idx
+        while left_idx > 0 and thickness[left_idx] > 0 and not np.isnan(thickness[left_idx]): left_idx -= 1
+        while right_idx < len(s_vals) - 1 and thickness[right_idx] > 0 and not np.isnan(thickness[right_idx]): right_idx += 1
             
         valid_s = s_vals[left_idx:right_idx]
         valid_thickness = thickness[left_idx:right_idx]
         
         if len(valid_s) > 1:
             cross_section_areas[i] = np.trapezoid(valid_thickness, valid_s)
-            
             X_surf[i, left_idx:right_idx] = transverse_x[left_idx:right_idx]
             Y_surf[i, left_idx:right_idx] = transverse_y[left_idx:right_idx]
             Z_surf[i, left_idx:right_idx] = z_base[left_idx:right_idx]
 
-    total_volume = np.trapezoid(cross_section_areas, cumulative_distance)
-    
+    total_volume = np.trapezoid(cross_section_areas, resampled_dist)
     return total_volume, X_surf, Y_surf, Z_surf
 
-def render_topography_and_mass(dem_df, rupture_df, X_surf, Y_surf, Z_surf, X_dep, Y_dep, Z_dep, grid_res=GRID_RES):
-    points = dem_df[['x', 'y']].values
-    values = dem_df['z'].values
-    topo_interp = LinearNDInterpolator(points, values)
-    
-    x_min, x_max = min(points[:, 0]), max(points[:, 0])
-    y_min, y_max = min(points[:, 1]), max(points[:, 1])
-    
-    grid_x_1d = np.arange(x_min, x_max + grid_res/2, grid_res)
-    grid_y_1d = np.arange(y_min, y_max + grid_res/2, grid_res)
-    grid_x, grid_y = np.meshgrid(grid_x_1d, grid_y_1d)
-    
-    grid_z = topo_interp(grid_x, grid_y)
-    
-    fig = go.Figure()
-
-    # Base Topography
-    fig.add_trace(go.Surface(
-        x=grid_x, y=grid_y, z=grid_z, 
-        colorscale='Earth', name='Topography', opacity=0.75, showscale=False,
-        lighting=dict(ambient=0.6, diffuse=0.5, roughness=0.5, specular=0.2)
-    ))
-
-    # Initial Failure Surface (Red)
-    fig.add_trace(go.Surface(
-        x=X_surf, y=Y_surf, z=Z_surf,
-        colorscale='Reds', name='Failure Surface', opacity=0.95, showscale=False,
-        lighting=dict(ambient=0.7, diffuse=0.6, roughness=0.4, specular=0.1)
-    ))
-    
-    # Final Deposited Mass (Blue/Teal)
-    fig.add_trace(go.Surface(
-        x=X_dep, y=Y_dep, z=Z_dep,
-        colorscale='Teal', name='Deposited Mass', opacity=0.95, showscale=False,
-        lighting=dict(ambient=0.7, diffuse=0.6, roughness=0.4, specular=0.1)
-    ))
-
-    # Rupture Axis Line
-    fig.add_trace(go.Scatter3d(
-        x=rupture_df['x'], y=rupture_df['y'], z=rupture_df['z'],
-        mode='lines+markers', line=dict(color='black', width=6),
-        marker=dict(size=4, color='black'), name='Main Axis'
-    ))
-
-    fig.update_layout(
-        title=f'Runout Propagation (Grid cell: {grid_res}m)',
-        scene=dict(xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Elevation (Z)', aspectmode='data'),
-        margin=dict(l=0, r=0, b=0, t=50), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        updatemenus=[dict(
-            type="buttons", direction="right", x=0.0, y=1.05, showactive=True,
-            buttons=list([
-                dict(label="Show All", method="update", args=[{"visible": [True, True, True, True]}]),
-                dict(label="Hide Results (Topo Only)", method="update", args=[{"visible": [True, False, False, True]}]),
-                dict(label="Failure Mass Only", method="update", args=[{"visible": [True, True, False, True]}]),
-                dict(label="Deposit Only", method="update", args=[{"visible": [True, False, True, True]}])
-            ])
-        )]
-    )
-
-    return fig
-
-def calculate_deposit_surface(dem_df, rupture_df, final_distance, target_volume, angle_of_repose, grid_res=GRID_RES):
+# ==========================================
+# STEP 5: Angle of Reach Footprint Envelope
+# ==========================================
+def calculate_runout_surface(X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res):
     """
-    Calculates the 3D surface of the deposited mass.
-    Anchors the toe of the deposit at 'final_distance' and searches backward 
-    for the peak location that perfectly conserves the initial volume.
+    Identifies the failure footprint and traces continuous flow paths via steepest descent.
+    Incorporates inertia and momentum to handle flat plateaus and smooth flow paths.
     """
-    points = dem_df[['x', 'y']].values
-    values = dem_df['z'].values
-    topo_interp = LinearNDInterpolator(points, values)
-    
     rx = rupture_df['x'].values
     ry = rupture_df['y'].values
     
-    orig_dist = np.zeros(len(rx))
-    for i in range(1, len(rx)):
-        orig_dist[i] = orig_dist[i-1] + np.sqrt((rx[i]-rx[i-1])**2 + (ry[i]-ry[i-1])**2)
+    dx_dir = rx[-1] - rx[0]
+    dy_dir = ry[-1] - ry[0]
+    len_dir = np.sqrt(dx_dir**2 + dy_dir**2)
+    dir_x = dx_dir / len_dir if len_dir > 0 else 0
+    dir_y = dy_dir / len_dir if len_dir > 0 else 1
+    
+    valid_mask = ~np.isnan(Z_surf)
+    total_valid = np.sum(valid_mask)
+    
+    target_pts = 150
+    stride = 1
+    if total_valid > target_pts:
+        stride = max(1, int(np.sqrt(total_valid / target_pts)))
         
-    # Helper to find X,Y coordinates anywhere along the axis (even extrapolated backwards or forwards)
-    def get_xy(s):
-        if s < 0:
-            dx, dy = rx[1] - rx[0], ry[1] - ry[0]
-            ds = orig_dist[1] - orig_dist[0]
-            return rx[0] + (dx/ds) * s, ry[0] + (dy/ds) * s
-        elif s <= orig_dist[-1]:
-            return np.interp(s, orig_dist, rx), np.interp(s, orig_dist, ry)
-        else:
-            dx, dy = rx[-1] - rx[-2], ry[-1] - ry[-2]
-            ds = orig_dist[-1] - orig_dist[-2]
-            return rx[-1] + (dx/ds) * (s - orig_dist[-1]), ry[-1] + (dy/ds) * (s - orig_dist[-1])
+    Xs_sample, Ys_sample = [], []
+    for i in range(0, X_surf.shape[0], stride):
+        for j in range(0, X_surf.shape[1], stride):
+            if valid_mask[i, j]:
+                Xs_sample.append(X_surf[i, j])
+                Ys_sample.append(Y_surf[i, j])
+                
+    Xs_sample = np.array(Xs_sample)
+    Ys_sample = np.array(Ys_sample)
+    
+    pts_sample = np.stack((Xs_sample, Ys_sample), axis=-1)
+    Zs_sample = topo_interp(pts_sample)
+    
+    # Pre-calculate Topographical Gradients
+    grad_x = np.gradient(grid_z, topo_res, axis=0)
+    grad_y = np.gradient(grid_z, topo_res, axis=1)
+    interp_dx = RegularGridInterpolator((x_1d, y_1d), grad_x, bounds_error=False, fill_value=0)
+    interp_dy = RegularGridInterpolator((x_1d, y_1d), grad_y, bounds_error=False, fill_value=0)
+    
+    Z_reach_max = np.full_like(grid_z, -np.inf)
+    tan_reach = np.tan(np.radians(angle_of_reach))
+    
+    check_lines_x, check_lines_y, check_lines_z = [], [], []
+    
+    ds = max(topo_res / 2.0, 0.5) 
+    paint_radius = max(2.0, 1.5 * topo_res) # Ensures a solid, smoothed footprint
+    
+    for xs, ys, zs in zip(Xs_sample, Ys_sample, Zs_sample):
+        if np.isnan(zs): continue
+        
+        x_curr, y_curr = xs, ys
+        L = 0
+        path_x, path_y, path_z = [xs], [ys], [zs]
+        
+        # Initialize with the main axis direction
+        prev_dir_x, prev_dir_y = dir_x, dir_y
+        
+        for _ in range(int(2500 / ds)):
+            pts = np.array([[x_curr, y_curr]])
+            gx = interp_dx(pts)[0]
+            gy = interp_dy(pts)[0]
+            
+            g_mag = np.sqrt(gx**2 + gy**2)
+            
+            # INERTIA: Maintain trajectory on flat terrain where gradient is near zero
+            if g_mag < 1e-4:
+                curr_dir_x, curr_dir_y = prev_dir_x, prev_dir_y
+            else:
+                raw_dir_x, raw_dir_y = -gx/g_mag, -gy/g_mag
+                
+                # MOMENTUM: Blend new descent vector with previous trajectory
+                curr_dir_x = 0.6 * raw_dir_x + 0.4 * prev_dir_x
+                curr_dir_y = 0.6 * raw_dir_y + 0.4 * prev_dir_y
+                
+                # Normalize the blended vector
+                m = np.sqrt(curr_dir_x**2 + curr_dir_y**2)
+                curr_dir_x /= m
+                curr_dir_y /= m
+                
+            prev_dir_x, prev_dir_y = curr_dir_x, curr_dir_y
+            
+            x_next = x_curr + ds * curr_dir_x
+            y_next = y_curr + ds * curr_dir_y
+            L += ds
+            
+            z_next = topo_interp(np.array([[x_next, y_next]]))[0]
+            if np.isnan(z_next):
+                break
+                
+            z_reach = zs - L * tan_reach
+            
+            path_x.append(x_next)
+            path_y.append(y_next)
+            path_z.append(z_reach)
+            
+            # Dynamically paint the maximum reach energy onto the structured grid
+            ix = int(np.round((x_curr - x_1d[0]) / topo_res))
+            iy = int(np.round((y_curr - y_1d[0]) / topo_res))
+            
+            b = max(2, int(paint_radius / topo_res) + 1)
+            for di in range(-b, b+1):
+                for dj in range(-b, b+1):
+                    ni, nj = ix + di, iy + dj
+                    if 0 <= ni < len(x_1d) and 0 <= nj < len(y_1d):
+                        dist = np.sqrt((x_1d[ni] - x_curr)**2 + (y_1d[nj] - y_curr)**2)
+                        if dist <= paint_radius:
+                            Z_reach_max[ni, nj] = max(Z_reach_max[ni, nj], z_reach)
+            
+            # Stop if the ray goes underground after escaping the immediate source area
+            if z_next > z_reach and L > 2.0:
+                break
+                
+            x_curr, y_curr = x_next, y_next
+            
+        check_lines_x.extend(path_x + [None])
+        check_lines_y.extend(path_y + [None])
+        check_lines_z.extend(path_z + [None])
 
-    # 1. Anchor the toe at the final_distance
-    s_toe = final_distance
-    toe_x, toe_y = get_xy(s_toe)
-    z_toe = topo_interp(toe_x, toe_y)
+    # The final runout footprint is where the topography intercepts this envelope
+    runout_mask = grid_z <= Z_reach_max
+    Z_runout_surf = np.where(runout_mask, Z_reach_max, np.nan)
     
-    if np.isnan(z_toe):
-        raise ValueError("The target toe distance falls outside the boundaries of the Topography DEM.")
-        
-    tan_repose = np.tan(np.radians(angle_of_repose))
-    
-    # 2. Setup a local grid large enough to contain the deposit searching backwards
-    buffer = 300 
-    x_vals = np.arange(min(np.min(rx), toe_x) - buffer, max(np.max(rx), toe_x) + buffer, grid_res)
-    y_vals = np.arange(min(np.min(ry), toe_y) - buffer, max(np.max(ry), toe_y) + buffer, grid_res)
-    X_grid, Y_grid = np.meshgrid(x_vals, y_vals)
-    Z_topo = topo_interp(X_grid, Y_grid)
-    
-    # 3. Objective function: Guess a peak position (s_peak) behind the toe, and calculate volume
-    def volume_difference(s_peak):
-        peak_x, peak_y = get_xy(s_peak)
-        
-        # The peak height is strictly defined so that the cone edge exactly touches the toe elevation
-        z_peak = z_toe + (s_toe - s_peak) * tan_repose
-        
-        dist_from_peak = np.sqrt((X_grid - peak_x)**2 + (Y_grid - peak_y)**2)
-        Z_cone = z_peak - dist_from_peak * tan_repose
-        
-        thickness = Z_cone - Z_topo
-        thickness = np.where(np.isnan(thickness), 0, thickness)
-        thickness[thickness < 0] = 0
-        
-        vol = np.sum(thickness) * (grid_res**2)
-        return vol - target_volume
-        
-    # 4. Search backwards from the toe (s_toe) up to 1000m behind the start line (-1000)
-    try:
-        s_peak_opt = brentq(volume_difference, -1000, s_toe)
-    except ValueError:
-        raise ValueError("Could not find a valid deposit geometry. The volume may be too large or the angle of repose too shallow.")
-    
-    # 5. Generate the final true deposit arrays based on the exact found peak
-    peak_x, peak_y = get_xy(s_peak_opt)
-    z_peak_opt = z_toe + (s_toe - s_peak_opt) * tan_repose
-    
-    dist_from_peak = np.sqrt((X_grid - peak_x)**2 + (Y_grid - peak_y)**2)
-    Z_cone_final = z_peak_opt - dist_from_peak * tan_repose
-    
-    deposit_thickness = Z_cone_final - Z_topo
-    Z_deposit_surf = np.where(deposit_thickness > 0, Z_cone_final, np.nan)
-    
-    # Note we are now returning the optimized peak position (s_peak_opt) as well
-    return X_grid, Y_grid, Z_deposit_surf, z_peak_opt, s_peak_opt
+    return Z_runout_surf, check_lines_x, check_lines_y, check_lines_z, Xs_sample, Ys_sample, Zs_sample
 
-def render_cross_section(dem_df, rupture_df, final_distance, angle_repose, z_peak_opt, s_peak_opt, grid_res=GRID_RES):
-    """Generates a 2D longitudinal profile along the central axis."""
-    points = dem_df[['x', 'y']].values
-    values = dem_df['z'].values
-    topo_interp = LinearNDInterpolator(points, values)
-
+def render_cross_section(x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_runout_surf, grid_res=0.5):
+    """
+    Generates the 2D longitudinal profile strictly along the original axis. 
+    Note: Real flow may curve away from this 2D slice.
+    """
     rx_orig = rupture_df['x'].values
     ry_orig = rupture_df['y'].values
     rz_orig = rupture_df['z'].values
+    
+    dx_dir = rx_orig[-1] - rx_orig[0]
+    dy_dir = ry_orig[-1] - ry_orig[0]
+    len_dir = np.sqrt(dx_dir**2 + dy_dir**2)
+    dir_x = dx_dir / len_dir if len_dir > 0 else 0
+    dir_y = dy_dir / len_dir if len_dir > 0 else 1
+    
+    max_idx = np.argmax(rz_orig)
+    x_max, y_max, z_max = rx_orig[max_idx], ry_orig[max_idx], rz_orig[max_idx]
 
     orig_dist = np.zeros(len(rx_orig))
     for i in range(1, len(rx_orig)):
         orig_dist[i] = orig_dist[i-1] + np.sqrt((rx_orig[i]-rx_orig[i-1])**2 + (ry_orig[i]-ry_orig[i-1])**2)
 
-    # Make the 2D plot extend slightly past the toe
-    max_dist = max(final_distance, orig_dist[-1]) + 50
-    s_1d = np.arange(-50, max_dist, grid_res) # Start a bit behind 0 to see backward spill
-
-    x_1d, y_1d = np.zeros_like(s_1d), np.zeros_like(s_1d)
+    s_1d = np.arange(-50, 2500, grid_res) 
+    x_prof, y_prof = np.zeros_like(s_1d), np.zeros_like(s_1d)
+    
     dx_last, dy_last = rx_orig[-1] - rx_orig[-2], ry_orig[-1] - ry_orig[-2]
     ds_last = orig_dist[-1] - orig_dist[-2]
     dx_first, dy_first = rx_orig[1] - rx_orig[0], ry_orig[1] - ry_orig[0]
@@ -278,37 +269,100 @@ def render_cross_section(dem_df, rupture_df, final_distance, angle_repose, z_pea
     
     for i, s in enumerate(s_1d):
         if s < 0:
-            x_1d[i] = rx_orig[0] + (dx_first/ds_first) * s
-            y_1d[i] = ry_orig[0] + (dy_first/ds_first) * s
+            x_prof[i] = rx_orig[0] + (dx_first/ds_first) * s
+            y_prof[i] = ry_orig[0] + (dy_first/ds_first) * s
         elif s <= orig_dist[-1]:
-            x_1d[i] = np.interp(s, orig_dist, rx_orig)
-            y_1d[i] = np.interp(s, orig_dist, ry_orig)
+            x_prof[i] = np.interp(s, orig_dist, rx_orig)
+            y_prof[i] = np.interp(s, orig_dist, ry_orig)
         else:
-            x_1d[i] = rx_orig[-1] + (dx_last/ds_last) * (s - orig_dist[-1])
-            y_1d[i] = ry_orig[-1] + (dy_last/ds_last) * (s - orig_dist[-1])
+            x_prof[i] = rx_orig[-1] + (dx_last/ds_last) * (s - orig_dist[-1])
+            y_prof[i] = ry_orig[-1] + (dy_last/ds_last) * (s - orig_dist[-1])
 
-    z_topo_1d = topo_interp(x_1d, y_1d)
+    pts = np.stack((x_prof, y_prof), axis=-1)
+    z_topo_1d = topo_interp(pts)
+    
     z_fail_1d = np.interp(s_1d, orig_dist, rz_orig, right=np.nan, left=np.nan)
     z_fail_1d = np.where(z_fail_1d <= z_topo_1d, z_fail_1d, np.nan)
     
-    # 3. Deposit Top Line using the newly found s_peak_opt
-    tan_repose = np.tan(np.radians(angle_repose))
-    dist_from_peak = np.abs(s_1d - s_peak_opt)
-    z_dep_1d = z_peak_opt - dist_from_peak * tan_repose
-    z_dep_1d = np.where(z_dep_1d >= z_topo_1d, z_dep_1d, np.nan)
+    dist_L = np.sqrt((x_prof - x_max)**2 + (y_prof - y_max)**2)
+    tan_reach = np.tan(np.radians(angle_of_reach))
+    proj_1d = (x_prof - x_max) * (dx_last/ds_last) + (y_prof - y_max) * (dy_last/ds_last)
+    z_reach_limit_1d = z_max - dist_L * tan_reach
+    z_reach_limit_1d = np.where(proj_1d > -20, z_reach_limit_1d, np.nan)
+    
+    mask_grid = Z_runout_surf.copy()
+    mask_grid[np.isnan(mask_grid)] = -9999
+    
+    interp_mask = RegularGridInterpolator((x_1d, y_1d), mask_grid, bounds_error=False, fill_value=-9999)
+    z_reach_contour_1d = interp_mask(pts)
+    z_deposit_1d = np.where(z_reach_contour_1d > -9999, z_reach_contour_1d, np.nan)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=s_1d, y=z_topo_1d, mode='lines', name='Topography', line=dict(color='black', width=3)))
     fig.add_trace(go.Scatter(x=s_1d, y=z_fail_1d, mode='lines', name='Failure Base', line=dict(color='red', width=3, dash='dash')))
-    fig.add_trace(go.Scatter(x=s_1d, y=z_dep_1d, mode='lines', name='Deposit Top', line=dict(color='teal', width=3)))
-
-    # Add a vertical marker to explicitly show the target runout toe
-    fig.add_vline(x=final_distance, line_width=1, line_dash="dot", line_color="teal", annotation_text="Target Runout Reach")
+    fig.add_trace(go.Scatter(x=s_1d, y=z_reach_limit_1d, mode='lines', name='Global H/L Reference', line=dict(color='teal', width=2, dash='dot')))
+    fig.add_trace(go.Scatter(x=s_1d, y=z_deposit_1d, mode='lines', name='Composite Footprint Envelope', line=dict(color='teal', width=4)))
 
     fig.update_layout(
-        title='2D Longitudinal Cross-Section',
+        title='2D Longitudinal Cross-Section (Dual Resolution Model)',
         xaxis_title='Distance along main axis (m)', yaxis_title='Elevation (Z)',
-        template='plotly_white', hovermode='x unified',
-        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+        template='plotly_white', hovermode='x unified', legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+    )
+    return fig
+
+def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, check_x, check_y, check_z, pt_x, pt_y, pt_z):
+    fig = go.Figure()
+
+    # Trace 0: Topography
+    fig.add_trace(go.Surface(
+        x=X_grid, y=Y_grid, z=grid_z, colorscale='Earth', name='Topography',
+        opacity=0.75, showscale=False, lighting=dict(ambient=0.6, diffuse=0.5, roughness=0.5, specular=0.2)
+    ))
+
+    # Trace 1: Failure Surface
+    fig.add_trace(go.Surface(
+        x=X_surf, y=Y_surf, z=Z_surf, colorscale='Reds', name='Failure Surface',
+        opacity=0.95, showscale=False, lighting=dict(ambient=0.7, diffuse=0.6, roughness=0.4, specular=0.1)
+    ))
+    
+    # Trace 2: Traced Runout
+    fig.add_trace(go.Surface(
+        x=X_grid, y=Y_grid, z=Z_runout_surf, colorscale='Teal', name='Traced Runout',
+        opacity=0.95, showscale=False, lighting=dict(ambient=0.7, diffuse=0.6, roughness=0.4, specular=0.1)
+    ))
+
+    # Trace 3: Main Axis
+    fig.add_trace(go.Scatter3d(
+        x=rupture_df['x'], y=rupture_df['y'], z=rupture_df['z'],
+        mode='lines+markers', line=dict(color='black', width=6),
+        marker=dict(size=4, color='black'), name='Main Axis'
+    ))
+
+    # Trace 4: Check Points (Discretized Source Centers) - Hidden by default
+    fig.add_trace(go.Scatter3d(
+        x=pt_x, y=pt_y, z=pt_z, mode='markers',
+        marker=dict(size=3, color='blue', opacity=0.8), name='Discretized Cells', visible=False
+    ))
+
+    # Trace 5: Check Lines (Source to Toe projection paths) - Hidden by default
+    fig.add_trace(go.Scatter3d(
+        x=check_x, y=check_y, z=check_z, mode='lines',
+        line=dict(color='orange', width=2), name='Reach Projection Paths', visible=False
+    ))
+
+    fig.update_layout(
+        title='3D Geometric Surface Model',
+        scene=dict(xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Elevation (Z)', aspectmode='data'),
+        margin=dict(l=0, r=0, b=0, t=50), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        updatemenus=[dict(
+            type="buttons", direction="right", x=0.0, y=1.05, showactive=True,
+            buttons=list([
+                dict(label="Show Results", method="update", args=[{"visible": [True, True, True, True, False, False]}]),
+                dict(label="Topo Only", method="update", args=[{"visible": [True, False, False, True, False, False]}]),
+                dict(label="Failure Mass Only", method="update", args=[{"visible": [True, True, False, True, False, False]}]),
+                dict(label="Deposit Only", method="update", args=[{"visible": [True, False, True, True, False, False]}]),
+                dict(label="Check Discretization", method="update", args=[{"visible": [True, False, False, True, True, True]}])
+            ])
+        )]
     )
     return fig
