@@ -1,12 +1,25 @@
+import os
+import sys
+import threading
+import webbrowser
 from flask import Flask, render_template, request, send_file, redirect, url_for
 import pandas as pd
 import traceback
 import runout_physics 
 
-app = Flask(__name__)
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller. """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+# Initialize Flask with absolute paths for the bundled templates
+app = Flask(__name__, template_folder=resource_path('templates'))
 app.secret_key = 'super_secret_key_for_flash_messages'
 
-# Global cache to hold the latest simulation results for exporting
 sim_cache = {}
 
 @app.route('/', methods=['GET', 'POST'])
@@ -14,6 +27,10 @@ def index():
     try:
         angle_of_reach = 20.0
         friction_angle = 30.0
+        
+        # Resolve paths for the default files inside the executable
+        default_dem = resource_path('dem_mesh.txt')
+        default_rupture = resource_path('rupture_section.txt')
         
         if request.method == 'POST':
             angle_of_reach = float(request.form.get('angle_of_reach', 20.0))
@@ -25,16 +42,16 @@ def index():
             if dem_file and dem_file.filename != '':
                 dem_df = pd.read_csv(dem_file)
             else:
-                dem_df = pd.read_csv('dem_mesh.txt')
+                dem_df = pd.read_csv(default_dem)
                 
             if rupture_file and rupture_file.filename != '':
                 rupture_df = pd.read_csv(rupture_file)
             else:
-                rupture_df = pd.read_csv('rupture_section.txt')
+                rupture_df = pd.read_csv(default_rupture)
                 
         else:
-            dem_df = pd.read_csv('dem_mesh.txt')
-            rupture_df = pd.read_csv('rupture_section.txt')
+            dem_df = pd.read_csv(default_dem)
+            rupture_df = pd.read_csv(default_rupture)
 
         x_1d, y_1d, X_grid, Y_grid, grid_z, topo_interp, topo_res = runout_physics.build_structured_topo(dem_df)
 
@@ -46,14 +63,12 @@ def index():
             X_grid, Y_grid, grid_z, topo_interp, rupture_df, angle_of_reach, X_surf, Y_surf, Z_surf, x_1d, y_1d, topo_res
         )
         
-        # --- CACHE RESULTS FOR EXPORTING ---
         sim_cache.clear()
         sim_cache.update({
             'x_1d': x_1d, 'y_1d': y_1d, 'X_grid': X_grid, 'Y_grid': Y_grid,
             'grid_z': grid_z, 'X_surf': X_surf, 'Y_surf': Y_surf, 'Z_surf': Z_surf, 
             'Z_runout_surf': Z_runout_surf, 'topo_res': topo_res
         })
-        # -----------------------------------
 
         fig_3d = runout_physics.render_topography_and_mass(
             X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, 
@@ -75,8 +90,6 @@ def index():
         volume=volume, friction_angle=friction_angle, angle_of_reach=angle_of_reach,
         has_results=bool(sim_cache) 
     )
-
-# --- EXPORT ENDPOINTS ---
 
 @app.route('/export/madflow')
 def export_madflow():
@@ -110,5 +123,13 @@ def export_csv():
     filename = f"{surface_type}_surface.csv"
     return send_file(csv_io, mimetype='text/csv', as_attachment=True, download_name=filename)
 
+def open_browser():
+    """ Automatically opens the default web browser after a short delay. """
+    webbrowser.open_new('http://127.0.0.1:5000/')
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Launch the browser in a separate thread so it doesn't block the Flask server
+    threading.Timer(1.25, open_browser).start()
+    
+    # Run the server (turn debug=False for production)
+    app.run(host='127.0.0.1', port=5000, debug=False)
