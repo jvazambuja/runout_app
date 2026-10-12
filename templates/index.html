@@ -6,10 +6,27 @@
     <title>Advanced Runout Propagation Model</title>
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; display: flex; flex-direction: column; min-height: 100vh;}
-        .container-fluid { flex: 1; }
-        .sidebar { background-color: #ffffff; padding: 25px; border-right: 1px solid #e0e0e0; height: 100vh; overflow-y: auto; }
-        .main-content { padding: 25px; height: 100vh; overflow-y: auto; }
+        html, body { height: 100%; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; display: flex; flex-direction: column; overflow: hidden; }
+        .container-fluid { flex: 1; min-height: 0; }
+        .container-fluid > .row { height: 100%; }
+        .sidebar { background-color: #ffffff; padding: 25px; border-right: 1px solid #e0e0e0; height: 100%; overflow-y: auto; }
+        .main-content { min-width: 0; padding: 25px; height: 100%; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; }
+        .main-content > .tab-content { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+        .main-content > .tab-content > #view3d,
+        .main-content > .tab-content > #view2d { height: 100%; min-height: 0; }
+        .results-card { height: 100%; min-height: 0; margin-bottom: 0; display: flex; flex-direction: column; }
+        .results-card .card-body { height: 100%; box-sizing: border-box; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+        .plot-container { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; }
+        .results-card .plotly-graph-div { width: 100% !important; height: 100% !important; min-height: 0; }
+        .plot-toolbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; background: #fff; }
+        .plot-toolbar button { white-space: nowrap; }
+        .nav-tabs { flex: 0 0 auto; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+        .nav-tabs .nav-link { white-space: nowrap; }
+        .nav-tabs .nav-item { flex: 0 0 auto; }
+        .svg-container { overflow-x: auto; }
+        .svg-container svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+        .code-block { max-width: 100%; overflow-x: auto; }
         .card { border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
         .nav-tabs .nav-link.active { font-weight: bold; color: #0056b3; border-bottom: 3px solid #0056b3; }
         .nav-tabs .nav-link { color: #555; border: none; }
@@ -20,6 +37,13 @@
         .math-text { font-family: 'Courier New', Courier, monospace; background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
         .code-block { background-color: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; font-family: monospace; }
         footer { background-color: #ffffff; border-top: 1px solid #e0e0e0; padding: 15px 0; font-size: 0.9em; }
+        @media (max-width: 767.98px) {
+            body { overflow: auto; }
+            .container-fluid, .container-fluid > .row { height: auto; }
+            .sidebar { height: auto; max-height: none; border-right: 0; border-bottom: 1px solid #e0e0e0; }
+            .main-content { height: 75vh; min-height: 520px; padding: 15px; overflow: hidden; }
+            .nav-tabs .nav-link { padding: 0.5rem 0.65rem; font-size: 0.9rem; }
+        }
     </style>
 </head>
 <body>
@@ -126,10 +150,19 @@
             <div class="tab-content mt-4" id="myTabContent">
                 <!-- 3D View Tab -->
                 <div class="tab-pane fade show active" id="view3d" role="tabpanel">
-                    <div class="card">
+                    <div class="card results-card">
                         <div class="card-body p-0">
                             {% if plot_html %}
-                                {{ plot_html | safe }}
+                                <div class="plot-toolbar" role="toolbar" aria-label="3D visualization layers">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-visibility="results">Show Results</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-visibility="topography">Topo Only</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-visibility="failure">Failure Mass Only</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-visibility="deposit">Deposit Only</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-visibility="checks">Check Discretization</button>
+                                </div>
+                                <div class="plot-container">
+                                    {{ plot_html | safe }}
+                                </div>
                             {% else %}
                                 <div class="p-5 text-center text-muted">Run the simulation to generate the 3D model.</div>
                             {% endif %}
@@ -139,10 +172,12 @@
 
                 <!-- 2D View Tab -->
                 <div class="tab-pane fade" id="view2d" role="tabpanel">
-                    <div class="card">
+                    <div class="card results-card">
                         <div class="card-body p-0">
                             {% if plot_2d_html %}
-                                {{ plot_2d_html | safe }}
+                                <div class="plot-container">
+                                    {{ plot_2d_html | safe }}
+                                </div>
                             {% else %}
                                 <div class="p-5 text-center text-muted">Run the simulation to generate the 2D cross-section.</div>
                             {% endif %}
@@ -318,5 +353,35 @@ x,y,z<br>
 <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+<script>
+    (function () {
+        function resizePlots() {
+            if (!window.Plotly) return;
+            document.querySelectorAll('.plotly-graph-div').forEach(function (plot) {
+                window.Plotly.Plots.resize(plot);
+            });
+        }
+
+        window.addEventListener('resize', resizePlots);
+        document.querySelectorAll('[data-toggle="tab"]').forEach(function (tab) {
+            tab.addEventListener('shown.bs.tab', resizePlots);
+        });
+        document.querySelectorAll('[data-visibility]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var plot = document.querySelector('#view3d .plotly-graph-div');
+                if (!plot || !window.Plotly) return;
+                var visibility = {
+                    results: [true, true, true, true, false, false, true],
+                    topography: [true, false, false, true, false, false, false],
+                    failure: [true, true, false, true, false, false, false],
+                    deposit: [true, false, true, true, false, false, true],
+                    checks: [true, false, false, true, true, true, true]
+                };
+                window.Plotly.restyle(plot, {visible: visibility[this.dataset.visibility]});
+            });
+        });
+        window.addEventListener('load', resizePlots);
+    }());
+</script>
 </body>
 </html>

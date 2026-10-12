@@ -74,12 +74,22 @@ def index():
             X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_surf, Z_surf, Z_runout_surf, 
             check_x, check_y, check_z, pt_x, pt_y, pt_z, env_x, env_y, env_z
         )
-        plot_3d_html = fig_3d.to_html(full_html=False)
+        plot_3d_html = fig_3d.to_html(
+            full_html=False,
+            default_width='100%',
+            default_height='100%',
+            config={'responsive': True}
+        )
         
         fig_2d = runout_physics.render_cross_section(
             x_1d, y_1d, topo_interp, rupture_df, angle_of_reach, Z_runout_surf
         )
-        plot_2d_html = fig_2d.to_html(full_html=False)
+        plot_2d_html = fig_2d.to_html(
+            full_html=False,
+            default_width='100%',
+            default_height='100%',
+            config={'responsive': True}
+        )
         
     except Exception as e:
         return f"An error occurred processing the data: {e} <br><br><b>Stack Trace:</b><br><pre>{traceback.format_exc()}</pre>"

@@ -385,19 +385,17 @@ def render_topography_and_mass(X_grid, Y_grid, grid_z, rupture_df, X_surf, Y_sur
 
     # Update menus with 7 trace booleans
     fig.update_layout(
-        title='3D Geometric Surface Model',
-        scene=dict(xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Elevation (Z)', aspectmode='data'),
-        margin=dict(l=0, r=0, b=0, t=50), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        updatemenus=[dict(
-            type="buttons", direction="right", x=0.0, y=1.05, showactive=True,
-            buttons=list([
-                dict(label="Show Results", method="update", args=[{"visible": [True, True, True, True, False, False, True]}]),
-                dict(label="Topo Only", method="update", args=[{"visible": [True, False, False, True, False, False, False]}]),
-                dict(label="Failure Mass Only", method="update", args=[{"visible": [True, True, False, True, False, False, False]}]),
-                dict(label="Deposit Only", method="update", args=[{"visible": [True, False, True, True, False, False, True]}]),
-                dict(label="Check Discretization", method="update", args=[{"visible": [True, False, False, True, True, True, True]}])
-            ])
-        )]
+        title=dict(text='3D Geometric Surface Model', x=0.02, xanchor='left', y=0.96, yanchor='top'),
+        scene=dict(
+            xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Elevation (Z)',
+            aspectmode='manual',
+            aspectratio=dict(x=4.0, y=4.0, z=1.0),
+            camera=dict(
+                projection=dict(type='orthographic'),
+                eye=dict(x=1.35, y=1.35, z=0.85)
+            )
+        ),
+        margin=dict(l=0, r=0, b=0, t=55), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
     )
     return fig
 # ==========================================
