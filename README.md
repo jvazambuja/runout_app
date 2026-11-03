@@ -2,6 +2,23 @@
 
 A web-based Python application for determining the geometric volume and footprint of hypothetical slope failures, utilizing 3D Plotly rendering and Flask.
 
+## Running from source
+
+Use Python 3.12 or newer, create a virtual environment, install the dependencies, and start the application from the project directory:
+
+```text
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+python app.py
+```
+
+The browser opens at `http://127.0.0.1:5000/`. The application resolves its templates and default input files relative to `app.py`, so it can also be started from another working directory.
+
+## Running the Windows executable
+
+Extract the complete distribution archive before running `RunoutModel.exe`. Windows Defender or corporate antivirus software may quarantine or block a newly built executable; if that happens, allow the file only after verifying its source. The executable includes Python and the application dependencies, so Python does not need to be installed separately.
+
 ## Authorship
 Developed by [Your Name/Institution]. This tool was created to assist in the visualization and preliminary volume estimation of geotechnical runout scenarios.
 
